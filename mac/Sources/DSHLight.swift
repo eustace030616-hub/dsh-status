@@ -594,8 +594,11 @@ struct LightGeometry {
 
     static func of(_ style: LightStyle) -> LightGeometry {
         switch style {
-        case .classic: return LightGeometry(lens: 18, gap: 8, padding: 8, housing: false)
-        case .nostalgic: return LightGeometry(lens: 26, gap: 10, padding: 10, housing: true)
+        // Lenses are 20% larger than they began: 18 -> 22 and 26 -> 31, rounded
+        // to whole points so the circles stay crisp. The gaps are unchanged, so
+        // the light reads as chunkier bulbs in the same housing.
+        case .classic: return LightGeometry(lens: 22, gap: 8, padding: 8, housing: false)
+        case .nostalgic: return LightGeometry(lens: 31, gap: 10, padding: 10, housing: true)
         }
     }
 
@@ -778,13 +781,14 @@ final class TrafficLightView: NSView {
     private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, housing: Bool) {
         let colour = colour(of: lens)
         if lit {
-            // Ten percent down from opaque: a lit lens still reads as glass
+            // Twenty percent down from opaque: a lit lens still reads as glass
             // rather than as a flat sticker.
-            colour.withAlphaComponent(0.9 * level).setFill()
+            colour.withAlphaComponent(0.8 * level).setFill()
         } else {
             // A resting lens is dark glass, not a hole: visible enough that the
-            // traffic light still reads as one when nothing is lit.
-            colour.withAlphaComponent(housing ? 0.24 : 0.32).setFill()
+            // traffic light still reads as one when nothing is lit. One value
+            // for both styles, so rest looks the same either way.
+            colour.withAlphaComponent(0.20).setFill()
         }
         NSBezierPath(ovalIn: rect).fill()
 

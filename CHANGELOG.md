@@ -15,6 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-02
+
+### Changed
+
+- **Lenses are 20% larger** — 18 to 22 points in the flat style, 26 to 31 in the housing, rounded to whole
+  points so the circles stay crisp. The gaps are unchanged, so the light reads as chunkier bulbs in the
+  same shape.
+- **Rest is 20% and lit is 80%.** One resting value for both styles, so rest looks the same either way,
+  and a lit lens stops short of opaque so it keeps reading as glass.
+
+## [0.5.2] - 2026-10-02
+
 ## [0.5.2] - 2026-10-02
 
 ### Fixed
