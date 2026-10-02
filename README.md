@@ -137,8 +137,24 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 ## Verify stage 1
 
 ```bash
-watch -n1 cat "$HOME/Library/Application Support/dsh-status/state.json"
+cat "$HOME/Library/Application Support/dsh-status/state.json"
 ```
+
+To watch transitions rather than the 2 s heartbeat — this prints only when `state` or `reason`
+changes, and needs nothing installed:
+
+```bash
+S="$HOME/Library/Application Support/dsh-status/state.json"
+last=""
+while true; do
+  cur=$(python3 -c "import json;d=json.load(open('$S'));print(d['state'],d['reason'])" 2>/dev/null)
+  [ "$cur" != "$last" ] && printf '%s  %s\n' "$(date +%H:%M:%S)" "$cur"
+  last="$cur"
+  sleep 0.5
+done
+```
+
+> `watch` is a Linux tool and is not shipped with macOS — `brew install watch` if you want it.
 
 Expected on a fresh session: `unknown`, then a prompt of yours makes it `working`, and the end of the
 turn makes it `waiting`. `reason` tells you which event wrote each line. If the state never changes,
@@ -155,17 +171,20 @@ Two layers, deliberately separated because they prove different things:
 
 | File | What it proves | What it cannot |
 |---|---|---|
-| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, and that an unwritable path warns once. 15 checks. | Nothing about cordis — it drives a purpose-built stub context. |
+| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, and that an unwritable path warns once. 16 checks. | Nothing about cordis — it drives a purpose-built stub context. |
 | `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, and a bad state path cannot break the mount. 10 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
 
 Both run against real files in a temp directory. Neither needs DSH, a network, or an API key.
 
 ## Known gaps
 
-- **No live agent turn has driven this.** The event names, the `{ ...payload, agent }` fusion
-  (`agentEvents` in `dsh-agent`), and the `parentSession` filter are verified from shipped source and
-  from real child session logs — but the plugin has not run inside a booted harness, because mounting
-  it requires restarting DSH. Expect a calibration pass on first install.
+- **The prompt → `working` path is confirmed live; the turn end is not.** Installing through the
+  plugin page and sending a prompt produced `state: "working"`, `reason: "prompt"`, a `sessionId`
+  matching the live session, `meta.cwd` matching its workspace, an advancing heartbeat, no `.tmp`
+  residue and no warnings in the harness log — so `agent/pre-step`, the root-agent filter and the
+  writer behave as designed in a real harness. The `turn-end` → `waiting` write has **not** been
+  observed, because the next turn's prompt overwrites it before it can be read; watch the file in the
+  gap between turns to confirm it.
 - `title` is always `null`. The session title plainly exists (the session log carries `session/title`
   events) but which accessor exposes it is unconfirmed, and a wrong guess would be worse than `null`.
   Fill it in when the renderer needs it.
