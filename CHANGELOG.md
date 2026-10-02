@@ -15,11 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Stage 2 — the renderer (`mac/`).** `DSHLight.app`, a universal ad-hoc-signed dot that reads the
+  state document and draws red (unknown or stale), yellow (working) or green (waiting) above every
+  window, on every Space, and over another application's fullscreen window. It clicks through to DSH
+  and drags to reposition, remembering the position; a display that disappears cannot strand it
+  off-screen. `./mac/build.sh` produces the bundle; it needs no Apple Developer account.
+- **`--print` mode**, a persistent follower for inspecting the light without a window: it prints the
+  current light at once, then only when the light or its reason changes. Colour is emitted only when
+  stdout is a terminal.
+- Launch flags: `--state-file`, `--print`, `--interval`, `--open`, `--level`, `--size`.
+
 ### Planned
 
-- **Stage 2 — a native macOS renderer.** A small `DSHLight.app` that reads the state document and
-  draws red / yellow / green, with the state path as a launch argument so it can be developed
-  against a fixture before this plugin is installed anywhere.
 - **Stage 3 — wiring.** The plugin spawns the renderer and reaps it on dispose. This is the point at
   which the built binary must be added to the `files` allow-list, or installed copies will break
   while a source checkout keeps working.

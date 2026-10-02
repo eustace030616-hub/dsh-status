@@ -1,14 +1,15 @@
 # dsh-status
 
-**Stage 1 of the DSH status light.** A DSH plugin that publishes the session's current state to
-one small JSON file, so a native macOS indicator (stage 2) can draw it.
+**A traffic light for DeepSeek Harness.** A DSH plugin publishes the session's current state to one
+small JSON file; a native macOS dot reads it and shows red / yellow / green above every window.
 
-It reads nothing and draws nothing. The file is the entire interface between the two halves, which
-is what lets each be built and tested while the other does not exist.
+The file is the entire interface between the two halves, which is what let each be built and tested
+while the other did not exist.
 
-- **Stage 1 — this package.** Publisher.
-- **Stage 2** — native renderer (`DSHLight.app`), reads the file, draws red/yellow/green.
-- **Stage 3** — wiring: the plugin spawns and supervises the renderer.
+- **Stage 1 — the publisher.** `package.json`, `cordis.patch.yml`, `lib/`. Installable from the plugin page.
+- **Stage 2 — the renderer.** `mac/`. `DSHLight.app`, universal and ad-hoc signed.
+- **Stage 3 — the wiring.** Not built: the plugin will spawn and supervise the renderer, and the
+  built binary will then have to join the `files` allow-list.
 
 ## The contract
 
@@ -133,6 +134,46 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 > Keep the plugin dependency-free. A `link:` install does **not** install the linked package's own
 > dependencies, and a resolution failure inside a plugin can stop every profile from booting — that
 > is exactly the incident the desktop-pet bridge hit in its PR #104.
+
+## Stage 2 — the renderer
+
+`mac/` builds **DSHLight.app**: one dot that reads the state document and shows red (unknown or
+stale), yellow (working) or green (waiting) above every window, on every Space, and over another
+application's fullscreen window. Click it to bring DSH forward; drag it to move it, and it remembers
+where you left it.
+
+```bash
+./mac/build.sh              # universal binary, ad-hoc signed, into ./build
+open build/DSHLight.app     # draw it
+pkill -f DSHLight           # stop it
+```
+
+To follow the light in a terminal instead — printed once, then only when it changes:
+
+```bash
+./mac/build.sh --run
+```
+
+| Flag | Effect |
+|---|---|
+| `--state-file PATH` | which document to read (default: the published path) |
+| `--print` | follow in the terminal instead of drawing a window |
+| `--interval SECONDS` | poll interval, default `0.25` |
+| `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
+| `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
+| `--size POINTS` | dot diameter, default `24` |
+
+Three properties worth keeping:
+
+- **It only ever reads.** Nothing in the renderer writes to the state file, so it cannot disturb the
+  publisher or the session.
+- **A dead feed is red, not the last colour.** The heartbeat is what makes that possible — without
+  it, a killed DSH would leave a green light claiming the agent had finished.
+- **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
+  package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
+
+`mac/` is deliberately **not** in the package's `files`: at stage 3 the plugin will spawn the built
+binary, and that is the moment the binary has to ship with the package.
 
 ## Verify stage 1
 
