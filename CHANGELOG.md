@@ -17,13 +17,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- **README pruned where the new sections made older ones redundant.** `## Usage` is now the only place the
-  colour mapping lives — it gained the contract state names and the pulse numbers — so the duplicate
-  renderer-mapping table and the paragraph beneath it are gone. The one fact only that paragraph carried, that
-  a reader meeting a state it has never heard of rests rather than alarms, moved into the extension rule; the
-  `--print` character legend went with it. The expanded list is drawn once, in `## Usage`, so the daemon
-  section keeps only the folded first level, and two red-versus-dark bullets became one. "The renderer" is
-  "the daemon" throughout, and the contract example no longer carries a real session id and home path.
+- **The README is a third of what it was: 488 → 186 lines.** Install is one line — paste
+  `github:eustace030616-hub/traffic-light` into the plugin page and restart — and the clone-and-mount-by-path
+  fallback is a clause rather than a section. Usage, the data path, the document, the transitions, the config
+  and the daemon each keep their table or diagram and lose the prose around it. The design rationale and the
+  war stories behind each constant moved out of the README and into this changelog, where they were written.
+- Also gone or merged: the duplicate colour mapping (Usage is the only one), the `--print` character legend,
+  the second drawing of the expanded list, and two red-versus-dark bullets now one. "The renderer" is "the
+  daemon" throughout, and the contract example no longer carries a real session id and home path.
+- The turn-end → `waiting` write, listed for several releases as unobserved, is now observed live: the state
+  file went `working / prompt` → `waiting / turn-end` at 23:15:08, and the next prompt overwrote it, exactly
+  as the heartbeat model predicts. That Known-gap bullet is gone, and `agent/status: idle` remains the seam
+  that covers the endings `turn-stopping` misses.
 
 ## [0.7.14] - 2026-10-02
 
