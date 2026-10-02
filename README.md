@@ -31,7 +31,7 @@ while the other did not exist.
 | Field | Meaning |
 |---|---|
 | `version` | Contract version. Bumped **only** for a breaking change. |
-| `state` | `idle` \| `working` \| `waiting`. |
+| `state` | `idle` \| `working` \| `waiting` \| `asking`. |
 | `sessionId` | Session being reported on, or `null`. |
 | `title` | Session title, or `null` (see *Known gaps*). |
 | `updatedAt` | ms epoch. **When the publisher was last heard from.** Re-stamped every `heartbeatMs` even when nothing changes — that is what makes staleness work, and why it must never be read as a change time. |
@@ -47,7 +47,9 @@ while the other did not exist.
 | file missing/unparseable, no timestamp, or `now - updatedAt > 3 × heartbeatMs` | 🔴 red — *the feed is broken* |
 | `state: "working"` | 🟡 yellow |
 | `state: "waiting"` | 🟢 green — *the turn is over; nobody has looked yet* |
+| `state: "asking"` | 🔵 blue — *the agent is blocked on you: a permission or a question* |
 | `state: "idle"`, a legacy `"unknown"`, or **any value this build does not know** | ⚪ grey — *rest* |
+
 
 The split between red and grey is the important one. **Red means the feed itself cannot be trusted**
 — the file is gone, unreadable or stale, so nothing can be said about the session. **Grey means the
@@ -69,6 +71,7 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 | → `idle` | plugin load, a session coming up or being switched to, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching sessions is how a user acknowledges a green: the reminder has done its job. |
 | → `working` | `agent/pre-step` with a non-empty `messages` | The only verified signal that a prompt was actually accepted. The empty case is the ordinary between-steps pass and is ignored. |
 | → `waiting` | `agent/turn-stopping` | The turn is about to close and is waiting on the user. |
+| → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light stays blue until the last one is answered. |
 | *(ignored)* | any of the above on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. |
 
 Two further safety properties:
@@ -183,6 +186,9 @@ Three properties worth keeping:
   keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
   has not learned yet are all rest, and the reminder green is what stands out because nothing else
   competes with it.
+- **A click only takes the screen when the light is asking for you.** Green (finished), blue (blocked
+  on an answer) and red (no signal) bring DSH forward; clicking on grey or yellow does nothing at all,
+  so a stray click while you are mid-task in another window cannot move you.
 - **Green retires itself when you come back.** The publisher cannot know this: switching between
   live sessions emits no agent event at all — verified by recording the state file across a switch,
   which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives

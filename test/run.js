@@ -155,6 +155,40 @@ await check('a second prompt flips back to working', async () => {
   assert.equal(read().state, 'working')
 })
 
+await check('a permission request turns the light blue, and answering returns it to work', async () => {
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const handler = main.handlers.get('approval/request')
+  assert.ok(handler, 'no approval/request listener registered')
+  const pending = handler({ agent: ROOT, toolName: 'bash' }, () => gate.then(() => 'allow'))
+  await sleep(5)
+  assert.equal(read().state, 'asking')
+  assert.equal(read().reason, 'approval')
+  release()
+  assert.equal(await pending, 'allow', 'the observer must return the real answer')
+  assert.equal(read().state, 'working')
+})
+
+await check('a question uses the same blue, and two open asks stay blue until both answer', async () => {
+  let releaseA, releaseB
+  const gateA = new Promise((resolve) => { releaseA = resolve })
+  const gateB = new Promise((resolve) => { releaseB = resolve })
+  const ask = main.handlers.get('user-questions/request')
+  const handler = main.handlers.get('approval/request')
+  const first = handler({ agent: ROOT }, () => gateA.then(() => 'allow'))
+  const second = ask({ agent: ROOT }, () => gateB.then(() => 'allow'))
+  await sleep(5)
+  assert.equal(read().state, 'asking')
+  releaseA()
+  await first
+  await sleep(5)
+  assert.equal(read().state, 'asking', 'the second ask is still open')
+  releaseB()
+  await second
+  assert.equal(read().state, 'working')
+  assert.equal(read().reason, 'answered')
+})
+
 await check('a real change moves changedAt, and repeating the same state does not', async () => {
   const before = read()
   await sleep(5)

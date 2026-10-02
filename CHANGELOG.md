@@ -45,6 +45,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `changedAt` in the state document: when the current state was asserted, as distinct from when the
   publisher was last heard from.
 - Launch flags: `--state-file`, `--print`, `--interval`, `--open`, `--level`, `--size`.
+- **Blue: the agent is blocked on the user.** A permission prompt (`approval/request`) or a question
+  (`user-questions/request`) reports `asking`, which the light draws blue and treats as a call for
+  attention. Both seams are waterfalls, so the publisher observes by publishing before delegating and
+  returning the real answerer's result untouched; concurrent asks are counted, and the light stays
+  blue until the last one is answered. Deliberately not root-filtered — a subagent's approval still
+  needs the human — which is the one place the root filter does not apply.
+- **A click now depends on the light.** Green, blue and red bring DSH forward, because something
+  finished, is blocked, or is broken. Grey and yellow do nothing, so a click while the user is
+  mid-task elsewhere cannot steal their screen.
 - **Acknowledgement by return.** A green finish settles to grey once the user is back at DSH — either
   by switching to it or by clicking the light — because the reminder has been served. The
   acknowledgement is Mac-side (the harness has no idea which window is in front), it is stored, and it

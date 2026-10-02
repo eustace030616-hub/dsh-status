@@ -26,6 +26,8 @@ enum Light: String {
     case idle
     case working
     case waiting
+    /// The agent is blocked on the user: a permission or a question.
+    case asking
     case broken
 
     /// Fold a published `state` onto a light. Anything unrecognised becomes
@@ -36,6 +38,7 @@ enum Light: String {
         switch published {
         case "working": self = .working
         case "waiting": self = .waiting
+        case "asking": self = .asking
         default: self = .idle
         }
     }
@@ -79,6 +82,7 @@ struct Reading {
         case .idle: return "⚪"
         case .working: return "🟡"
         case .waiting: return "🟢"
+        case .asking: return "🔵"
         case .broken: return "🔴"
         }
     }
@@ -88,6 +92,7 @@ struct Reading {
         case .idle: return "idle"
         case .working: return "working"
         case .waiting: return "waiting"
+        case .asking: return "asking"
         case .broken: return "no signal"
         }
     }
@@ -351,6 +356,7 @@ private func coloured(_ text: String, _ light: Light) -> String {
     case .idle: code = "90"  // grey
     case .working: code = "33"  // yellow
     case .waiting: code = "32"  // green
+    case .asking: code = "34"  // blue
     case .broken: code = "31"  // red
     }
     return "\u{001B}[\(code)m\(text)\u{001B}[0m"
@@ -419,6 +425,7 @@ final class DotView: NSView {
         case .idle: return .systemGray
         case .working: return .systemYellow
         case .waiting: return .systemGreen
+        case .asking: return .systemBlue
         case .broken: return .systemRed
         }
     }
@@ -503,11 +510,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = DotView(frame: NSRect(x: 0, y: 0, width: side, height: side))
         view.onTap = { [weak self] in
-            // A click is a deliberate "take me there", so it settles the light
-            // even when DSH was already in front and no switch will be seen.
-            self?.acknowledgement?.acknowledge()
-            self?.refresh()
-            self?.bringHarnessForward()
+            guard let self, let light = self.view?.reading.light else { return }
+            // The light only calls for the user when it is green (finished),
+            // blue (blocked on an answer) or red (no signal). On grey or yellow
+            // the user is mid-task, and a click must not take the screen away
+            // from whatever they are doing — so the click does nothing at all.
+            guard light == .waiting || light == .asking || light == .broken else { return }
+            if light == .waiting {
+                // Clicking is also a deliberate "take me there", so it settles
+                // the reminder even when DSH was already in front and no switch
+                // will be seen.
+                self.acknowledgement?.acknowledge()
+            }
+            self.refresh()
+            self.bringHarnessForward()
         }
         view.onMove = { origin in
             UserDefaults.standard.set([origin.x, origin.y], forKey: AppDelegate.originKey)

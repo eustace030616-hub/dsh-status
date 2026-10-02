@@ -133,6 +133,21 @@ await check('a subagent prompt is ignored under real dispatch — no false yello
   assert.equal(read().state, 'waiting')
 })
 
+await check('an approval through the real waterfall still gets the real answer', async () => {
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const pending = ctx.waterfall(
+    'approval/request',
+    { agent: ROOT_AGENT },
+    () => gate.then(() => 'unavailable')
+  )
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(read().state, 'asking', 'the observer did not turn the light blue')
+  release()
+  assert.equal(await pending, 'unavailable', 'the observer swallowed the real answer')
+  assert.equal(read().state, 'working')
+})
+
 await check('fiber disposal runs the effect disposer and clears the session', async () => {
   await fork.dispose()
   const doc = read()
