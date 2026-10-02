@@ -145,8 +145,9 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 
 `mac/` builds **DSHLight.app**: one dot that reads the state document and shows yellow (working),
 green (the turn is over and nobody has looked yet), grey (rest) or red (the feed itself is broken)
-above every window, on every Space, and over another application's fullscreen window. Click it to
-bring DSH forward; drag it to move it, and it remembers where you left it.
+above every window, on every Space, and over another application's fullscreen window. A green finish
+settles to grey once you are back at DSH, because the reminder has been served. Click it to bring DSH
+forward; drag it to move it, and it remembers where you left it.
 
 ```bash
 ./mac/build.sh              # universal binary, ad-hoc signed, into ./build
@@ -166,6 +167,8 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--print` | follow in the terminal instead of drawing a window |
 | `--interval SECONDS` | poll interval, default `0.25` |
 | `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
+| `--ack-app BUNDLE-ID` | another application whose return to the front settles a green; repeatable |
+| `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
 | `--size POINTS` | dot diameter, default `24` |
 
@@ -176,8 +179,17 @@ Three properties worth keeping:
 - **A dead feed is red, not the last colour.** The heartbeat is what makes that possible — without
   it, a killed DSH would leave a green light claiming the agent had finished.
 - **Rest is grey, not red.** Red is reserved for a feed that cannot be trusted, so it stays rare and
-  keeps its meaning. A session switch, a fresh boot, or a state this build has not learned yet are
-  all rest, and the reminder green is what stands out because nothing else competes with it.
+  keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
+  has not learned yet are all rest, and the reminder green is what stands out because nothing else
+  competes with it.
+- **Green retires itself when you come back.** The publisher cannot know this: switching between
+  live sessions emits no agent event at all — verified by recording the state file across a switch,
+  which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives
+  on the Mac, where the frontmost window is visible. It is stored in `UserDefaults`, shared by both
+  modes, and compared against the finish's `updatedAt` — a newer finish is green again rather than
+  being suppressed by an older acknowledgement. If you drive DSH in a browser rather than the desktop
+  app, add its bundle identifier: `--ack-app com.apple.Safari`, knowing that any return to Safari
+  then counts as a return to DSH.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
   package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
 

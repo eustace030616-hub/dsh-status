@@ -55,6 +55,9 @@ struct Reading {
     var sessionId: String?
     /// Seconds since the publisher last wrote. `nil` when there is no file.
     var age: Double?
+    /// When that write happened. An acknowledgement is compared against this,
+    /// so a *new* finish is never swallowed by an older acknowledgement.
+    var publishedAt: Date?
     /// The heartbeat expired: the last state is no longer a claim about now.
     var stale = false
 
@@ -127,8 +130,100 @@ enum StateFile {
         // An unrecognised value is rest, not failure: the feed is healthy and
         // simply says something this build has not learned yet.
         let light = Light(published: object["state"] as? String ?? "")
-        return Reading(light: light, detail: reason, sessionId: sessionId, age: age)
+        return Reading(
+            light: light,
+            detail: reason,
+            sessionId: sessionId,
+            age: age,
+            publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000)
+        )
     }
+}
+
+// MARK: - Acknowledgement
+
+enum TargetApp {
+    /// The bundle identifier of an installed application, read from its own
+    /// Info.plist so nothing here hard-codes an identity that could change.
+    static func bundleIdentifier(of appPath: String) -> String? {
+        let plistPath = (appPath as NSString).appendingPathComponent("Contents/Info.plist")
+        guard let data = FileManager.default.contents(atPath: plistPath),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let object = plist as? [String: Any] else { return nil }
+        return object["CFBundleIdentifier"] as? String
+    }
+}
+
+/// Whether the user has come back to DSH since the last finish.
+///
+/// Green is a reminder; once the user is looking at DSH again the reminder has
+/// been served, and the light rests. Only the Mac can know this — the harness
+/// has no notion of which window is in front — so the acknowledgement lives
+/// here and the state file is left alone.
+///
+/// Two ways to acknowledge, because both mean "I am back":
+///   - the frontmost application *becomes* DSH (switching back to it), and
+///   - clicking the light, which is a deliberate "take me there".
+final class Acknowledgement {
+    private static let storedKey = "DSHLight.acknowledgedAt"
+
+    private let targets: Set<String>
+    private var previousFrontmost: String?
+    private(set) var at: Date?
+
+    init(targets: Set<String>, fallbackAppPath: String) {
+        var resolved = targets
+        if resolved.isEmpty, let identifier = TargetApp.bundleIdentifier(of: fallbackAppPath) {
+            resolved = [identifier]
+        }
+        self.targets = resolved
+        let stored = UserDefaults.standard.double(forKey: Acknowledgement.storedKey)
+        if stored > 0 { self.at = Date(timeIntervalSince1970: stored) }
+        // Whatever is in front now was not "coming back": only a later change is.
+        self.previousFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    var targetDescription: String {
+        targets.isEmpty ? "none — acknowledgement is off" : targets.sorted().joined(separator: ", ")
+    }
+
+    /// Note a return to DSH. Returns true only on the transition, so a user who
+    /// stays in DSH does not keep re-acknowledging.
+    @discardableResult
+    func poll() -> Bool {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        defer { previousFrontmost = frontmost }
+        guard let frontmost, frontmost != previousFrontmost, targets.contains(frontmost) else {
+            return false
+        }
+        acknowledge()
+        return true
+    }
+
+    func acknowledge() {
+        let now = Date()
+        at = now
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Acknowledgement.storedKey)
+    }
+
+    /// True when this finish happened before the user came back.
+    func covers(_ publishedAt: Date?) -> Bool {
+        guard let at, let publishedAt else { return false }
+        return at >= publishedAt
+    }
+}
+
+/// What to draw, once the acknowledgement is taken into account. A finish the
+/// user has already returned to is rest, not a reminder — but a *newer* finish
+/// is green again, because the acknowledgement is older than it.
+func displayed(_ reading: Reading, acknowledgedBy acknowledgement: Acknowledgement?) -> Reading {
+    guard reading.light == .waiting, acknowledgement?.covers(reading.publishedAt) == true else {
+        return reading
+    }
+    var settled = reading
+    settled.light = .idle
+    settled.detail = "\(reading.detail) · back in dsh"
+    return settled
 }
 
 // MARK: - Options
@@ -140,6 +235,10 @@ struct Options {
     var level: NSWindow.Level = .screenSaver
     var diameter: CGFloat = 24
     var interval = 0.25
+    /// Bundle identifiers whose return to the front acknowledges a finish.
+    var ackTargets: Set<String> = []
+    /// Set by --no-ack: green is kept until the publisher says otherwise.
+    var ackDisabled = false
 
     static let usage = """
     DSHLight — a traffic light for DeepSeek Harness.
@@ -148,10 +247,17 @@ struct Options {
           Follow the light in this terminal: print it now, then again on every
           change. Ctrl-C to stop.
 
-      DSHLight [--state-file PATH] [--open APP] [--level LEVEL] [--size POINTS]
+      DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
+               [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
           apps. Click it to bring DSH forward, drag it to move it.
           LEVEL is floating, status or screensaver (default screensaver).
+
+          A green finish rests as soon as you come back to DSH — either by
+          switching to it or by clicking the light — because the reminder has
+          been served. --ack-app adds another application whose return counts;
+          repeat it for several. The default is the application named by
+          --open. --no-ack keeps green until the next prompt instead.
 
       DSHLight --help
     """
@@ -176,6 +282,11 @@ struct Options {
                 if let raw = value(), let seconds = Double(raw), seconds > 0 { options.interval = seconds }
             case "--size":
                 if let raw = value(), let points = Double(raw), points > 4 { options.diameter = CGFloat(points) }
+            case "--ack-app":
+                if let identifier = value() { options.ackTargets.insert(identifier) }
+            case "--no-ack":
+                options.ackTargets = []
+                options.ackDisabled = true
             case "--level":
                 switch value() {
                 case "floating": options.level = .floating
@@ -222,10 +333,19 @@ private func stamp() -> String {
 /// "Changes" means the light or its stable reason — not the clock. A follower
 /// that reprinted on every tick would bury the one transition it exists to show.
 func runPrintMode(_ options: Options) {
+    let acknowledgement = options.ackDisabled
+        ? nil
+        : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
     print("watching \(options.statePath)")
+    if let acknowledgement {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        print("resting when these come to the front: \(acknowledgement.targetDescription)")
+        print("frontmost now: \(front)")
+    }
     var previous: String?
     while true {
-        let reading = StateFile.read(at: options.statePath)
+        acknowledgement?.poll()
+        let reading = displayed(StateFile.read(at: options.statePath), acknowledgedBy: acknowledgement)
         if reading.signature != previous {
             previous = reading.signature
             var line = "\(reading.label) · \(reading.detail)"
@@ -237,7 +357,11 @@ func runPrintMode(_ options: Options) {
             // Flush so a piped reader sees the light as it changes.
             fflush(stdout)
         }
-        Thread.sleep(forTimeInterval: options.interval)
+        // Pump the run loop instead of sleeping. NSWorkspace reports the
+        // frontmost application through a notification delivered on this loop,
+        // so a plain sleep never processes it and the process keeps seeing
+        // whatever was in front when it started.
+        RunLoop.current.run(until: Date().addingTimeInterval(options.interval))
     }
 }
 
@@ -313,6 +437,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var view: DotView?
     private var timer: Timer?
+    private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
+        ? nil
+        : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
     private static let originKey = "DSHLight.windowOrigin"
 
     init(options: Options) {
@@ -338,7 +465,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovableByWindowBackground = false
 
         let view = DotView(frame: NSRect(x: 0, y: 0, width: side, height: side))
-        view.onTap = { [weak self] in self?.bringHarnessForward() }
+        view.onTap = { [weak self] in
+            // A click is a deliberate "take me there", so it settles the light
+            // even when DSH was already in front and no switch will be seen.
+            self?.acknowledgement?.acknowledge()
+            self?.refresh()
+            self?.bringHarnessForward()
+        }
         view.onMove = { origin in
             UserDefaults.standard.set([origin.x, origin.y], forKey: AppDelegate.originKey)
         }
@@ -360,7 +493,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refresh() {
         guard let view else { return }
-        let reading = StateFile.read(at: options.statePath)
+        acknowledgement?.poll()
+        let reading = displayed(StateFile.read(at: options.statePath), acknowledgedBy: acknowledgement)
         // Redraw only when the colour actually changes: the dot is idle most of
         // the time, and the reading itself changes every heartbeat tick.
         if reading.light != view.reading.light {

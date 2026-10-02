@@ -43,6 +43,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   current light at once, then only when the light or its reason changes. Colour is emitted only when
   stdout is a terminal.
 - Launch flags: `--state-file`, `--print`, `--interval`, `--open`, `--level`, `--size`.
+- **Acknowledgement by return.** A green finish settles to grey once the user is back at DSH — either
+  by switching to it or by clicking the light — because the reminder has been served. The
+  acknowledgement is Mac-side (the harness has no idea which window is in front), it is stored, and it
+  is compared against the finish's `updatedAt`, so a *newer* finish is green again rather than being
+  swallowed by an older acknowledgement. `--ack-app BUNDLE-ID` adds an application whose return
+  counts, repeatable; `--no-ack` turns the whole thing off and keeps green until the next prompt.
+
+### Fixed
+
+- **`--print` never saw the frontmost application change.** It slept between polls, and `NSWorkspace`
+  delivers that change as a notification on the run loop, so the process kept reporting whatever was
+  in front when it started — the acknowledgement would have shipped as a feature that silently did
+  nothing. Found by testing against a real application switch; the loop now pumps the run loop.
 
 ### Planned
 
