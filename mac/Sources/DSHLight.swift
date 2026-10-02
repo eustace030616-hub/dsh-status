@@ -650,10 +650,14 @@ struct Look {
     static let restRange: ClosedRange<Double> = 0.04...0.60
     static let litRange: ClosedRange<Double> = 0.20...1.00
 
-    /// The values the light was tuned to by hand before the sliders existed, so
-    /// a fresh install looks like the light that was approved rather than like
-    /// a new object.
-    static let standard = Look(lens: 31, gap: 10, restAlpha: 0.20, litAlpha: 0.80)
+    /// What a fresh install wears, and the fallback for a remembered value that
+    /// is missing or unreadable.
+    ///
+    /// These are the numbers the light was dialled to by hand, picked up from the
+    /// preferences of the light they were chosen on — a new install should look
+    /// like the approved light, not like a different object. The body's opacity
+    /// is the one that has no slider: see `bodyOpacity`.
+    static let standard = Look(lens: 20, gap: 8, restAlpha: 0.15, litAlpha: 0.85)
 
     /// The two styles this build used to have, read once and translated into
     /// slider values: whoever was on the 22-point flat light keeps a 22-point
@@ -978,9 +982,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
     /// How solid the grey body behind the lenses is, against the material's own
-    /// full strength: thirty percent fainter, so it reads as a hint of a body
-    /// rather than as a panel with a light standing in it.
-    private static let bodyOpacity: CGFloat = 0.7
+    /// full strength: half of it, so the body reads as a hint of a shape rather
+    /// than as a panel with a light standing in it. There is no slider for this
+    /// one — it is the closest thing the light has to a fixed piece of its look.
+    private static let bodyOpacity: CGFloat = 0.5
     /// The platform's top-up page: the same destination DSH's own account service
     /// publishes for this (`/top_up` against the platform origin), so the list is
     /// not inventing a URL that could drift from the product's.

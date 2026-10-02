@@ -207,8 +207,9 @@ To follow the light in a terminal instead — printed once, then only when it ch
 
 The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
-and dark appearance on its own. The body is **thirty percent fainter than the material** (`bodyOpacity`,
-0.7), which is a hint of a body rather than a panel with a light standing in it.
+and dark appearance on its own. The body is **half the material's own strength** (`bodyOpacity`, 0.5) — a hint
+of a shape rather than a panel with a light standing in it — and it is one of the two parts of the look with
+no slider, the other being the corner radius.
 
 The body and the light are **siblings, not parent and child**. They were nested until the body needed to be
 fainter than opaque, and a view's alpha applies to everything inside it: the lenses would have faded along

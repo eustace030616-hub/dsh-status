@@ -15,6 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-10-02
+
+### Changed
+
+- **The grey body is half the material's strength** (`bodyOpacity`, 0.5, was 0.7): a hint of a shape rather
+  than a panel with a light standing in it. It is one of the two parts of the look with no slider, the other
+  being the corner radius.
+- **A fresh install now wears the numbers the light was dialled to**: 20 pt lenses, an 8 pt gap, 15% rest and
+  85% lit — read off the preferences of the light they were chosen on, so a new install looks like the
+  approved light rather than a different object. Existing installs are untouched: remembered values win, and
+  this is only the fallback for a value that is missing or unreadable.
+
 ## [0.7.3] - 2026-10-02
 
 ### Changed
