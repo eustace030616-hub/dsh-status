@@ -412,9 +412,9 @@ struct Options {
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
                [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
-          apps. It docks to the nearest screen border when you drop it, and the
-          border decides the shape: lenses stack on a side edge and lie in a row
-          on a top or bottom one.
+          apps. It is a traffic light: three lenses stacked, red at the top. It
+          docks to the nearest side of the screen when you drop it, and slides
+          up and down that side until you drop it again.
           DOUBLE-CLICK switches between DSH and the application you came from,
           whatever is lit. RIGHT-CLICK opens the list. Dragging docks it
           elsewhere, and a single click does nothing on purpose.
@@ -557,51 +557,6 @@ func runPrintMode(_ options: Options) {
 
 // MARK: - Window mode
 
-// MARK: The menu bar as the system reports it
-
-/// How much of `screen`'s top edge a menu bar occupies, read out of a window
-/// list.
-///
-/// Kept apart from the query below because this is the part with the arithmetic
-/// in it, and the part worth being able to read on its own: the bar is the
-/// window at layer 24 that is as wide as the screen, its bounds are measured
-/// **down** from the top of the main display, and the piece of it below that
-/// screen's top edge is what has to be reserved. `mainTop` is the main display's
-/// height, which is what turns this screen's Cocoa frame into those coordinates.
-///
-/// The cap is what makes the answer boring in the ways that matter. The bar's
-/// window is taller than the bar — around eight points of blur that hang past
-/// it, measured at 30 against `NSStatusBar.thickness` of 22 — and that blur
-/// lands differently depending on which end of the window it is on. Capping at
-/// the bar's own height means the answer is the bar, however the window is
-/// built, and it agrees with a system that reserves the bar permanently.
-func menuBarOccupiedHeight(in windows: [[String: Any]], on screen: NSScreen, mainTop: CGFloat) -> CGFloat {
-    let edge = mainTop - screen.frame.maxY
-    var occupied: CGFloat = 0
-    for window in windows {
-        guard (window[kCGWindowLayer as String] as? Int) == 24,
-              let box = window[kCGWindowBounds as String] as? [String: Any],
-              let x = box["X"] as? Double, let y = box["Y"] as? Double,
-              let width = box["Width"] as? Double, let height = box["Height"] as? Double,
-              width > 200,
-              CGFloat(x) < screen.frame.maxX, CGFloat(x + width) > screen.frame.minX
-        else { continue }
-        occupied = max(occupied, CGFloat(y + height) - edge)
-    }
-    return min(max(occupied, 0), NSStatusBar.system.thickness)
-}
-
-/// The same, asked of the system: the menu bar windows that are on screen now,
-/// for the screen the light is on.
-func menuBarHeight(on screen: NSScreen) -> CGFloat {
-    let mainTop = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
-    let windows = CGWindowListCopyWindowInfo(
-        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-    ) as? [[String: Any]] ?? []
-    return menuBarOccupiedHeight(in: windows, on: screen, mainTop: mainTop)
-}
-
-
 // MARK: - Appearance
 
 /// Everything about the light the user can dial in, in one place.
@@ -652,13 +607,14 @@ struct Look {
         min(14, max(6, (lens * 0.32).rounded()))
     }
 
-    func size(_ orientation: LightOrientation) -> NSSize {
+    /// The light is a traffic light: three lenses stacked, red at the top. It
+    /// has one shape, and that shape is the only thing the window size, the
+    /// drawing and the snapping have to agree about.
+    var size: NSSize {
         let lenses = 3
         let length = CGFloat(lenses) * lens + CGFloat(lenses - 1) * gap + 2 * padding
         let breadth = lens + 2 * padding
-        return orientation == .horizontal
-            ? NSSize(width: length, height: breadth)
-            : NSSize(width: breadth, height: length)
+        return NSSize(width: breadth, height: length)
     }
 }
 
@@ -720,32 +676,16 @@ enum LookField: String, CaseIterable {
     }
 }
 
-enum LightOrientation: String, CaseIterable {
-    case horizontal
-    case vertical
-
-    var title: String {
-        switch self {
-        case .horizontal: return "Horizontal"
-        case .vertical: return "Vertical"
-        }
-    }
-}
-
-/// Which border the light is docked to. Remembered, because the menu is placed
-/// flush to the same one.
-enum ScreenBorder: String {
-    case left, right, top, bottom
-
-    /// A light on a side edge stacks its lenses; on a top or bottom edge it lays
-    /// them in a row. It then grows *along* the border it is docked to rather
-    /// than across it, which is what makes the docking look deliberate.
-    var orientation: LightOrientation {
-        switch self {
-        case .left, .right: return .vertical
-        case .top, .bottom: return .horizontal
-        }
-    }
+/// Which side of the screen the light is docked to. Remembered, because the list
+/// is placed flush to the same one.
+///
+/// There is no top and bottom, and no orientation to go with them. A traffic
+/// light is a vertical object: three lenses stacked, red at the top. Laying them
+/// in a row along the top edge made a shape that had to be re-fitted every time
+/// the menu bar moved, which is one problem that only existed because the shape
+/// did.
+enum ScreenSide: String {
+    case left, right
 }
 
 /// One lens of the three, in the order a traffic light and an Apple window
@@ -762,9 +702,6 @@ final class TrafficLightView: NSView {
         }
     }
     var look = Look.standard {
-        didSet { needsDisplay = true }
-    }
-    var orientation: LightOrientation = .horizontal {
         didSet { needsDisplay = true }
     }
 
@@ -839,28 +776,20 @@ final class TrafficLightView: NSView {
     }
 
     /// Lenses in fixed order, laid out along the current axis.
+    /// Lenses in fixed order, stacked from the top: red, then yellow, then
+    /// green, which is the order a traffic light has used for a century.
     private func lensRects() -> [(Lens, NSRect)] {
         let lens = look.lens
         let padding = look.padding
         let step = lens + look.gap
         return [Lens.red, .yellow, .green].enumerated().map { index, lensOfLight in
             let distance = CGFloat(index) * step
-            let rect: NSRect
-            if orientation == .horizontal {
-                rect = NSRect(
-                    x: padding + distance,
-                    y: padding,
-                    width: lens,
-                    height: lens
-                )
-            } else {
-                rect = NSRect(
-                    x: padding,
-                    y: bounds.height - padding - lens - distance,
-                    width: lens,
-                    height: lens
-                )
-            }
+            let rect = NSRect(
+                x: padding,
+                y: bounds.height - padding - lens - distance,
+                width: lens,
+                height: lens
+            )
             return (lensOfLight, rect)
         }
     }
@@ -971,28 +900,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private let finishes = FinishTracker()
     private var look = Look.standard
-    private var border: ScreenBorder = .right
-    /// How much of the top edge the menu bar is occupying right now, in points:
-    /// zero when it is out of the way and the bar's thickness when it is down.
-    private var menuBarReserved: CGFloat = 0
-    /// A timer that runs only while the bar is moving, so the light follows it.
-    private var settling: Timer?
-    /// How far the light sits from the border it is docked to.
+    private var side: ScreenSide = .right
+    /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
-    /// The same, along the top edge, where the light hugs rather than floats:
-    /// with the bar out of the way it should read as sitting *on* the screen
-    /// edge, not near it.
-    private static let topInset: CGFloat = 6
-    /// The bar slides in a fraction of a second. Watching it at the speed of the
-    /// state file would put the light at the bar's old position and leave it
-    /// there; these are the cadence and the patience of the follow-along.
-    private static let settlingInterval = 1.0 / 60.0
-    private static let settlingPatience = 0.9
-    private static let barStep: CGFloat = 0.5
-    /// How close two borders have to be before a drop counts as a corner.
-    /// Around one the nearest border is a coin toss, and a change of direction
-    /// there resizes the light — which is how it ended up half off the screen.
-    private static let cornerZone: CGFloat = 60
     /// How far above the point passed to `popUp` the top of the list lands.
     ///
     /// Measured, not documented: a menu is placed by its top-left corner, and
@@ -1000,7 +910,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// menu height and at every anchor tried. It used to pass unnoticed because
     /// the light outranked the list and swallowed the overlap; now that the list
     /// is drawn over the light, five points is the difference between flush and
-    /// a light with its bottom edge sliced off.
+    /// a light with its edge sliced off.
     private static let menuTopBias: CGFloat = 5
     private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
         ? nil
@@ -1010,7 +920,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let lookKey = "DSHLight.look"
     /// Where a style used to be remembered, read once to seed the look above.
     private static let legacyStyleKey = "DSHLight.style"
-    private static let borderKey = "DSHLight.border"
+    /// Where the docked side is remembered. Named for a border because it used
+    /// to hold four of them; a stale "top" or "bottom" simply fails to parse and
+    /// the side is decided from where the light is, as it always was.
+    private static let sideKey = "DSHLight.border"
 
     init(options: Options) {
         self.options = options
@@ -1023,9 +936,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             look.lens = min(max(wanted, CGFloat(Look.lensRange.lowerBound)),
                             CGFloat(Look.lensRange.upperBound)).rounded()
         }
-        border = ScreenBorder(rawValue: defaults.string(forKey: Self.borderKey) ?? "") ?? .right
+        side = ScreenSide(rawValue: defaults.string(forKey: Self.sideKey) ?? "") ?? .right
 
-        let size = look.size(border.orientation)
+        let size = look.size
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
@@ -1057,7 +970,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
         view.autoresizingMask = [.width, .height]
         view.look = look
-        view.orientation = border.orientation
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
@@ -1070,9 +982,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
         self.view = view
         self.backdrop = backdrop
-        // Measure the bar before the first dock, so the light starts where the
-        // bar actually is rather than where it was last time.
-        menuBarReserved = screen(of: window).map { menuBarHeight(on: $0) } ?? 0
         dock()
 
         refresh()
@@ -1083,14 +992,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.timer = timer
     }
 
-    /// The screen the light is on, which is the one whose menu bar matters.
+    /// The screen the light is on.
     private func screen(of window: NSWindow) -> NSScreen? {
         window.screen ?? NSScreen.main
     }
 
     private func refresh() {
         guard let view else { return }
-        syncMenuBar()
         acknowledgement?.poll()
         let raw = StateFile.read(at: options.statePath)
         let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
@@ -1120,77 +1028,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Docking
 
-    /// Flush to whichever border of its screen is nearest, and remember which,
-    /// because the menu is placed against the same one.
+    /// Flush to whichever side of its screen is nearest, and remember which,
+    /// because the list is placed against the same one.
+    ///
+    /// There is nothing else to decide. The light has one shape, so a change of
+    /// side cannot resize it, and the up-and-down position along the side is
+    /// whatever the user dropped it at.
     private func dock() {
-        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        guard let window, let screen = screen(of: window) else { return }
         let visible = usableFrame(of: screen)
-        border = borderToAdopt(for: window.frame, in: visible)
-        let want = look.size(border.orientation)
+        side = sideToAdopt(for: window.frame, in: visible)
+        let want = look.size
 
-        // Grow inward from the border it is heading to, so a change of shape
-        // never throws the light across the screen.
+        // Grow inward from the side it is heading to, so a change of size never
+        // throws the light across the screen.
         var frame = window.frame
         if frame.size != want {
-            switch border {
+            switch side {
             case .right: frame.origin.x = frame.maxX - want.width
             case .left: frame.origin.x = frame.minX
-            case .top: frame.origin.y = frame.maxY - want.height
-            case .bottom: frame.origin.y = frame.minY
             }
             frame.size = want
             window.setFrame(frame, display: true)
         }
 
-        let origin = dockedOrigin(size: want, border: border, in: visible, from: window.frame.origin)
+        let origin = dockedOrigin(size: want, in: visible, from: window.frame.origin)
         window.setFrameOrigin(origin)
 
         // The rounded body has to follow the size the sliders give it: a radius
         // tuned for one shape is a circle on a small light and a square on a
         // large one.
         view?.look = look
-        view?.orientation = border.orientation
         backdrop?.layer?.cornerRadius = min(14, want.height * 0.32)
 
-        UserDefaults.standard.set(border.rawValue, forKey: Self.borderKey)
+        UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey)
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
     }
 
-    /// Where the light sits for a border, given where it is now.
-    ///
-    /// Split out of `dock()` because the menu bar moves the light without the
-    /// user having moved it: the bar slides in and out several times a second,
-    /// and each of those steps has to re-place the light without writing a new
-    /// "remembered position" sixty times a second.
-    private func dockedOrigin(size want: NSSize, border: ScreenBorder, in visible: NSRect, from current: NSPoint) -> NSPoint {
+    /// The docked origin for the side the light is on: flush to that side, at
+    /// whatever height it was dropped.
+    private func dockedOrigin(size want: NSSize, in visible: NSRect, from current: NSPoint) -> NSPoint {
         var origin = current
-        switch border {
+        switch side {
         case .left: origin.x = visible.minX + Self.dockInset
         case .right: origin.x = visible.maxX - want.width - Self.dockInset
-        case .top: origin.y = visible.maxY - want.height - Self.topInset
-        case .bottom: origin.y = visible.minY + Self.dockInset
         }
-        // A last guarantee that no shape change can park the light off-screen,
-        // and that no border can leave it under the menu bar: a side-docked
-        // light sitting high on the screen is pushed down out of the bar's strip
-        // rather than being drawn underneath it.
+        // A last guarantee that no change can park the light off the screen, or
+        // under the menu bar: the bar only ever covers the top strip, and a
+        // vertical light is free to sit anywhere below it.
         origin.x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - want.width))
         origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - want.height))
         return origin
     }
 
-    /// Where a window may sit on a screen: its visible frame, less whatever the
-    /// menu bar is occupying at this moment.
+    /// Where a window may sit on a screen: its visible frame, less the menu bar.
     ///
-    /// `visibleFrame` cannot answer that on its own. With "automatically hide and
-    /// show the menu bar" on it reports the whole screen in *both* states —
-    /// measured as 1680x1050 against a 1680x1050 frame with the bar up and with
-    /// it down — so the bar has to be measured, and it is measured in
-    /// `menuBarHeight(on:)`. All this does is take the answer, and still respect
-    /// a system that reserves the bar for us.
+    /// The bar is reserved at its own height, always, and that is the end of it.
+    /// It cannot be measured to the point: with "automatically hide and show the
+    /// menu bar" on, `visibleFrame` reports the whole screen with the bar up and
+    /// with it down — measured, 1680x1050 against a 1680x1050 frame in both
+    /// states — and reading the bar's own window instead means following it at
+    /// video rate, which is a laggy light that overlaps the bar it is following.
+    /// A vertical light on a side edge has no business in the top strip anyway,
+    /// so the strip is simply held back and the light can never be underneath.
     private func usableFrame(of screen: NSScreen) -> NSRect {
         var frame = screen.visibleFrame
-        let menuBar = max(menuBarReserved, screen.frame.maxY - frame.maxY)
+        let menuBar = max(NSStatusBar.system.thickness, screen.frame.maxY - frame.maxY)
         let alreadyReserved = screen.frame.maxY - frame.maxY
         if alreadyReserved < menuBar {
             frame.size.height = max(0, frame.height - (menuBar - alreadyReserved))
@@ -1198,86 +1101,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return frame
     }
 
-    // MARK: The menu bar
-
-    /// How much of `screen`'s top edge the menu bar is occupying right now — the
-    /// system's answer, from `menuBarHeight(on:)` at the top of this file.
+    /// The side a drop should adopt: whichever of the two is nearer.
     ///
-    /// Notice the bar moving, place the light for it, and keep watching while it
-    /// is still in motion. Called from the same tick that reads the state file,
-    /// which is far too slow on its own: the bar takes a fraction of a second to
-    /// slide, and a light that only looked four times a second would arrive
-    /// after the bar had stopped, and jump.
-    private func syncMenuBar() {
-        guard let window, let screen = screen(of: window) else { return }
-        let measured = menuBarHeight(on: screen)
-        guard abs(measured - menuBarReserved) > Self.barStep else { return }
-        menuBarReserved = measured
-        place()
-        startSettling()
-    }
-
-    /// Follow the bar until it stops moving. This is the fast loop — the slow
-    /// one above only notices that something moved; this one keeps up with it,
-    /// and gives up after {@link settlingPatience} without a change.
-    private func startSettling() {
-        guard settling == nil else { return }
-        var lastChange = Date()
-        let timer = Timer.scheduledTimer(withTimeInterval: Self.settlingInterval, repeats: true) { [weak self] timer in
-            guard let self, let window = self.window, let screen = screen(of: window) else {
-                timer.invalidate()
-                return
-            }
-            let measured = menuBarHeight(on: screen)
-            if abs(measured - self.menuBarReserved) > Self.barStep {
-                self.menuBarReserved = measured
-                self.place()
-                lastChange = Date()
-            } else if Date().timeIntervalSince(lastChange) > Self.settlingPatience {
-                timer.invalidate()
-                self.settling = nil
-            }
-        }
-        RunLoop.current.add(timer, forMode: .common)
-        settling = timer
-    }
-
-    /// Re-place the light for the border it is already on, without deciding the
-    /// border again and without remembering the result: this is the menu bar
-    /// moving the light, not the user.
-    ///
-    /// A light docked to the top rides the bar, because that is the edge it is
-    /// anchored to. A light on any other border keeps the position it was given,
-    /// and is only pushed clear of the bar when the bar would otherwise be drawn
-    /// over it.
-    private func place() {
-        guard let window, let screen = window.screen ?? NSScreen.main else { return }
-        let want = look.size(border.orientation)
-        let origin = dockedOrigin(size: want, border: border, in: usableFrame(of: screen), from: window.frame.origin)
-        window.setFrameOrigin(origin)
-    }
-
-    /// The border a drop should adopt: the nearest one, unless the drop is in a
-    /// corner — where the light keeps the direction it already had.
-    ///
-    /// A corner is where two borders are within {@link cornerZone} of each
-    /// other. Without that rule, nudging the light around a corner flips its
-    /// orientation, which resizes it, which is how a horizontal light turned
-    /// vertical and left a lens or two off the screen. Only snapping clear of a
-    /// corner can change the direction.
-    private func borderToAdopt(for frame: NSRect, in visible: NSRect) -> ScreenBorder {
-        let distances: [(ScreenBorder, CGFloat)] = [
-            (.left, abs(frame.minX - visible.minX)),
-            (.right, abs(visible.maxX - frame.maxX)),
-            (.top, abs(visible.maxY - frame.maxY)),
-            (.bottom, abs(frame.minY - visible.minY))
-        ].sorted { $0.1 < $1.1 }
-
-        guard let nearest = distances.first else { return border }
-        if let second = distances.dropFirst().first, second.1 - nearest.1 < Self.cornerZone {
-            return border
-        }
-        return nearest.0
+    /// This carried a corner rule for a while, because a drop near a corner
+    /// could flip the light between a row and a stack and the flip resized it
+    /// half off the screen. One shape means the nearest side is the whole
+    /// answer.
+    private func sideToAdopt(for frame: NSRect, in visible: NSRect) -> ScreenSide {
+        let toLeft = abs(frame.minX - visible.minX)
+        let toRight = abs(visible.maxX - frame.maxX)
+        return toLeft <= toRight ? .left : .right
     }
 
     /// Restore the last position, clamped onto a screen that still exists — a
@@ -1304,15 +1137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Menu
 
-    /// The list hangs inward from the border the light is docked to, so a docked
-    /// light never opens a menu off the edge of the screen.
+    /// The list hangs inward from the side the light is docked to, so a docked
+    /// light never opens a list off the edge of the screen: to the right of a
+    /// light on the left edge, to the left of one on the right.
     ///
     /// Placement is worked out as the list's own top-left corner — `left` and
     /// `top` below — and only converted to the point `popUp` wants at the end,
     /// because that point is not the corner: the window lands `menuTopBias`
-    /// points higher. Reading the point as the top is what left a gap the height
-    /// of the menu beneath a light docked to the top or bottom edge, and only
-    /// there, because a side-docked light lines the two tops up anyway.
+    /// points higher.
     private func showMenu() {
         guard let window else { return }
         let menu = buildMenu()
@@ -1322,11 +1154,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         var left: CGFloat
         var top: CGFloat
-        switch border {
+        switch side {
         case .right: left = frame.minX - width; top = frame.maxY
         case .left: left = frame.maxX; top = frame.maxY
-        case .top: left = frame.minX; top = frame.minY
-        case .bottom: left = frame.minX; top = frame.maxY + height
         }
 
         // And keep the whole list on the screen it was opened from.

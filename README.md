@@ -206,29 +206,20 @@ The light sits on the **same material a menu uses**, so the right-click list rea
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
 and dark appearance on its own.
 
-The light **docks to whichever screen border is nearest** when dropped, and remembers which one. That
-border also decides the shape: lenses stack on a side edge and lie in a row along a top or bottom one, so
-the light always grows *along* the border rather than across it. The right-click list opens flush to the
-same border, hanging inward, so an edge-docked light never opens a menu off the edge of the screen.
+The light is a **traffic light**: three lenses stacked, red at the top. It has one shape, and it **docks to
+whichever side of the screen is nearer** when dropped — left or right, remembered — sliding up and down
+that side until it is dropped again. There is no horizontal mode: a row of lenses along the top edge was a
+shape that had to be re-fitted every time the menu bar moved, which is one problem that only existed
+because the shape did. The right-click list opens flush to the docked side, hanging inward, so an
+edge-docked light never opens a list off the edge of the screen.
 
-**A top-docked light hugs the edge and rides the menu bar.** The bar's height used to be reserved
-whatever the bar was doing, which parked the light 34 points down even with the bar hidden. The bar is
-measured now and the light follows it: 6 points below the screen edge while the bar is away, 6 points
-below the bar while it is down, and back up when it goes.
-
-That measurement cannot come from `visibleFrame`. With "automatically hide and show the menu bar" on it
-reports the whole screen in *both* states — 1680×1050 against a 1680×1050 frame here, bar up or bar down.
-It comes from the bar's own window instead: layer 24, as wide as the screen, bounds measured down from the
-top of the main display, and capped at `NSStatusBar.thickness` so the eight points of blur the window
-carries past the bar can never inflate the answer. The state-file tick notices the bar move; a 60 Hz loop
-rides the slide rather than arriving after it. A light docked to any other border keeps the position you
-gave it, and is only pushed clear if the bar would otherwise be drawn over it.
-
-
-**A drop near a corner keeps the direction it already had.** Around a corner the nearest border is a coin
-toss, and changing the shape there is what used to resize the light half off the screen; only a drop
-clear of a corner can turn it. Whatever happens, the final position is clamped inside the visible frame,
-so no shape change can park the light out of reach.
+**The menu bar's height is held back, simply and always.** With "automatically hide and show the menu bar"
+on, `visibleFrame` reports the whole screen whether the bar is up or down — 1680×1050 against a 1680×1050
+frame here — so `NSStatusBar.thickness` is reserved instead, and a vertical light on a side edge is clamped
+so its top can never reach the bar's strip. It is worth being plain about why it is reserved rather than
+followed: measuring the bar's own window and moving the light with it was tried, and it produced a laggy
+light that overlapped the bar it was following. A side-docked light has no business in the top strip, so
+the strip is held back and the light is never underneath it.
 
 ```
 Size   ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  22 pt
@@ -253,9 +244,9 @@ because the one event a menu is documented to push into a view it hosts is the m
 percents, so it can always reach the number the readout prints. While the list is open the light drops a
 level, below the menu, so a lens growing under a row cannot take the clicks meant for it.
 
-Orientation is not a setting at all: it follows the border the light is docked to, so the two can never
-disagree. The separated group is where the next feature goes — one row, in the same column, so every row
-keeps the same width for free.
+Orientation is not a setting at all, because there is only one: lenses stacked, red at the top. The
+separated group is where the next feature goes — one row, in the same column, so every row keeps the same
+width for free.
 
 Three properties worth keeping:
 

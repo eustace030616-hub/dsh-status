@@ -15,6 +15,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-02
+
+### Changed
+
+- **Horizontal mode is gone: the light is always a traffic light.** Three lenses stacked, red at the top,
+  docked to the left or right side of the screen and free to slide up and down that side. The row of lenses
+  along the top edge is what made the menu bar a problem worth solving, and the solution — measuring the
+  bar's own window and moving the light with it — was worse than the problem: a laggy light that overlapped
+  the bar it was following by a point or two. One shape, one axis, no tracking.
+- **Nothing follows the menu bar any more.** The bar's height is held back statically at
+  `NSStatusBar.thickness`, and a side-docked light is clamped so its top edge can never reach that strip.
+  That is a rule with no timer in it, which is the point.
+- **A drop anywhere picks the nearer side.** Dragging the light up to the top of the screen now lands it on
+  the left or right edge at that height, clear of the bar rather than under it — checked from six starting
+  positions, including the top centre and one above the screen.
+
+### Removed
+
+- `LightOrientation`, the top and bottom docking borders, the corner zone that existed only to stop a change
+  of shape from resizing the light, and the two menu-bar functions with their 60 Hz follow loop.
+
 ## [0.6.1] - 2026-10-02
 
 ### Changed

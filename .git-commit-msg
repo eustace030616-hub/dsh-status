@@ -1,29 +1,20 @@
-feat: the light hugs the top edge and rides the menu bar
+feat: one shape, one axis — the light is always vertical
 
-A top-docked light used to sit 34 points below the screen edge whatever the
-bar was doing, because the bar's height was reserved unconditionally. The bar
-is measured now, and the light follows it: 6 points below the screen edge with
-the bar away, 6 points below the bar while it is down, and back up when it
-goes. The top gap is 6 points; the side and bottom gaps are unchanged at 10.
+Horizontal mode is gone. Three lenses stacked, red at the top, docked to the
+left or right side of the screen and free to slide up and down it.
 
-- **The measurement cannot come from `visibleFrame`.** With "automatically hide
-  and show the menu bar" on, it reports the whole screen in *both* states —
-  1680x1050 against a 1680x1050 frame, bar up or bar down. It comes from the
-  bar's own window: layer 24, as wide as the screen, bounds measured down from
-  the top of the main display, so a bar that is out of the way sits at a
-  negative y and the part that has come down is `y + height` from the edge.
-- **The answer is capped at `NSStatusBar.thickness`, which is 22, not the 24
-  this build had assumed.** The bar's window is 30 against the bar's 22 — eight
-  points of blur hanging past it — and the cap makes the answer independent of
-  how that blur is laid out, and equal to what a system that shows the bar
-  permanently reserves.
-- **The light follows the slide rather than arriving after it.** The state-file
-  tick notices the bar move; a 60 Hz loop rides it until it stops moving. A
-  light on any other border keeps the position it was given and is only pushed
-  clear if the bar would otherwise be drawn over it.
-- `dock()` is split so that a menu-bar move re-places the light without
-  re-deciding its border and without writing a new remembered position sixty
-  times a second, and the arithmetic is a free function so it can be exercised
-  against made-up window lists — including the fully-revealed bar, which cannot
-  be provoked without a hand on the mouse, since warping the cursor does not
-  trip the reveal.
+The row of lenses along the top edge is what made the menu bar a problem worth
+solving, and the solution was worse than the problem: measuring the bar's own
+window and moving the light with it gave a laggy light that overlapped the bar
+it was following by a point or two. One shape, one axis, no tracking.
+
+- **Nothing follows the menu bar any more.** The bar's height is held back
+  statically at `NSStatusBar.thickness`, and a side-docked light is clamped so
+  its top edge can never reach that strip. A rule with no timer in it.
+- **A drop anywhere picks the nearer side.** Dragging the light to the top of
+  the screen now lands it on the left or right edge at that height, clear of the
+  bar rather than under it — checked from six starting positions, including the
+  top centre and one above the screen, driving the real launch path.
+- **Removed:** `LightOrientation`, the top and bottom dock borders, the corner
+  zone (which existed only to stop a change of shape from resizing the light),
+  and the two menu-bar functions with their 60 Hz follow loop.
