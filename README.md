@@ -35,7 +35,7 @@ The file is the entire interface between the two halves.
 | `updatedAt` | ms epoch. **When the publisher was last heard from.** Re-stamped every `heartbeatMs` even when nothing changes — that is what makes staleness work, and why it must never be read as a change time. |
 | `changedAt` | ms epoch. **When this state was last asserted.** Written on a publish and left alone by the heartbeat, so this — not `updatedAt` — is what an acknowledgement may be compared against. |
 | `heartbeatMs` | The publisher's cadence, so the renderer need not hardcode a staleness rule. |
-| `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `approval`, `question`, `answered`, `dispose`. Debugging only. |
+| `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `agent-idle`, `agent-running`, `approval`, `question`, `answered`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
 | `meta.sessions` | Every session the publisher is watching: `{ id, state, reason, changedAt }`. The headline `state` above is the most urgent of them, for readers that understand only one. |
 | `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. The renderer draws `total`; the breakdown rides along for a reader that wants it. Never carries a credential. |
@@ -76,8 +76,8 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 | Transition | Trigger | Why |
 |---|---|---|
 | → `idle` | plugin load, a session coming up, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching between live sessions emits no event at all, so the acknowledgement it counts as happens on the Mac, not here. |
-| → `working` | `agent/pre-step` with a non-empty `messages` | The only verified signal that a prompt was actually accepted. The empty case is the ordinary between-steps pass and is ignored. |
-| → `waiting` | `agent/turn-stopping` | The turn is about to close and is waiting on the user. |
+| → `working` | `agent/pre-step` with a non-empty `messages`, or `agent/status: running` | The only verified signal that a prompt was actually accepted — the empty case is the ordinary between-steps pass and is ignored. The status is the same claim a step earlier, and it is what revives a session after a stop. |
+| → `waiting` | `agent/turn-stopping`, or `agent/status: idle` | The turn is over and the next move is the user's. Both seams are needed: `turn-stopping` covers the ordinary end, and `agent/status` covers the ends it misses — a turn the user **stops** is aborted, the abort is re-thrown, and `turn-stopping` is never dispatched, which used to leave the light claiming work until DSH was restarted. A status of `idle` also drops any ask still counted, so nothing can restore `working` afterwards. |
 | → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light keeps pulsing until the last one is answered. |
 | *(ignored)* | a turn event on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. An ask is the exception: it is charged to the parent session, because the human is still the one who answers. |
 
@@ -378,9 +378,9 @@ Three files, deliberately separated because they prove different things:
 
 | File | What it proves | What it cannot |
 |---|---|---|
-| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, that an unwritable path warns once, and the account block: published, carried through a heartbeat, refused without moving the light, and off when switched off. 33 checks. | Nothing about cordis — it drives a purpose-built stub context. |
+| `test/run.js` | The state machine: every transition, both subagent filters, a stopped turn ending through `agent/status` when `turn-stopping` never fires, an ask that a stop clears, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, that an unwritable path warns once, and the account block: published, carried through a heartbeat, refused without moving the light, and off when switched off. 36 checks. | Nothing about cordis — it drives a purpose-built stub context. |
 | `test/balance.js` | The balance fetcher against every answer the endpoint can give: figures, a refused key, a server error, a dead connection, a timeout, and a body that cannot be read. It also asserts the key never appears in what comes back. 14 checks, no network and no key. | Nothing about the plugin around it — the `fetch` is handed in. |
-| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, a bad state path cannot break the mount, and the account reaches the real credential service. 13 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
+| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, a bad state path cannot break the mount, `agent/status` settles a stopped turn through the real emitter, and the account reaches the real credential service. 14 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
 
 All three run against real files in a temp directory. None needs DSH, a network, or an API key.
 
@@ -426,5 +426,3 @@ command arguments or output. If one does escape, say so plainly and rotate it th
 - `title` is always `null`. The session title plainly exists (the session log carries `session/title`
   events) but which accessor exposes it is unconfirmed, and a wrong guess would be worse than `null`.
   Fill it in when the renderer needs it.
-- `agent/status` appears in the harness docs as a UI-driving event, but no emitter for it exists in
-  any shipped bundle. Do not build on it until proven.

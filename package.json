@@ -1,6 +1,6 @@
 {
   "name": "dsh-status",
-  "version": "0.7.12",
+  "version": "0.7.13",
   "private": true,
   "description": "Publishes the root agent's turn state to a JSON file that the native traffic light renderer reads.",
   "type": "module",

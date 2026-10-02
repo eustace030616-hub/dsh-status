@@ -15,6 +15,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.13] - 2026-10-02
+
+### Fixed
+
+- **A stopped turn left the light yellow until DSH was restarted.** The end of a turn was learned from
+  `agent/turn-stopping` alone, and that notification is dispatched on the ordinary path only: the loop's abort
+  path sets `turnEnds = { kind: 'aborted' }` and re-throws, so a turn the user stops never reaches it. The
+  session kept the last thing the publisher had heard — `working` — and the renderer shows yellow while *any*
+  session is working, so the light stayed yellow with nothing running. The session was never "gone": it was
+  stopped, and no event said so.
+- **`agent/status` is the signal that covers every ending.** `dsh-agent-loop` emits `idle` or `running` on each
+  phase change (`get status()` — idle or maintenance counts as idle, anything else as running), and
+  `agentEvents` fuses the agent into the payload, so the existing root and session helpers apply unchanged. A
+  session that goes `idle` while `working` or `asking` now becomes `waiting` — the reminder green — and any ask
+  still counted is dropped with it, because the answer to that ask would otherwise arrive after the stop and
+  restore `working`, putting the light back to yellow. `running` marks the session working again, which is also
+  what revives it after a stop.
+- An `agent/status` for a subagent is ignored like every other turn event, and a repeated `idle` does not move
+  `changedAt`, so a stop cannot re-arm a green the user has already read.
+
+### Changed
+
+- The README's Known gaps no longer claim `agent/status` has no emitter — it is emitted by `dsh-agent-loop`,
+  and this release depends on it. `agent-idle` and `agent-running` join the documented `reason` values.
+- Three checks in `test/run.js` (the stop path, an ask cleared by a stop, a turn starting again) and one in
+  `test/cordis.js`, which drives both statuses through the real emitter.
+
 ## [0.7.12] - 2026-10-02
 
 ### Changed

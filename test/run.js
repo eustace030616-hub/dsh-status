@@ -222,6 +222,43 @@ await check('a question blocks it too, and two open asks stay blocked until both
   assert.equal(read().reason, 'answered')
 })
 
+await check('a stopped turn ends the session, though turn-stopping never fires', async () => {
+  const child = { session: { id: 'session-child-status', header: { parentSession: 'session-root' } } }
+  assert.equal(read().state, 'working')
+  await fire(main, 'agent/status', { agent: child, status: 'idle' })
+  assert.equal(read().state, 'working', 'a subagent status is not the session moving')
+
+  // The stop path: the loop aborts the turn and never dispatches turn-stopping.
+  await fire(main, 'agent/status', { agent: ROOT, status: 'idle' })
+  const stopped = read()
+  assert.equal(stopped.state, 'waiting', 'a stopped turn must not keep claiming work')
+  assert.equal(stopped.reason, 'agent-idle')
+
+  await sleep(5)
+  await fire(main, 'agent/status', { agent: ROOT, status: 'idle' })
+  assert.equal(read().changedAt, stopped.changedAt, 'idling twice is not a new thing to report')
+})
+
+await check('being idle clears an open ask, so a late answer cannot restore work', async () => {
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  await fire(main, 'agent/pre-step', { agent: ROOT, messages: [{ role: 'user' }] })
+  const pending = main.handlers.get('approval/request')({ agent: ROOT }, () => gate.then(() => 'allow'))
+  await sleep(5)
+  assert.equal(read().state, 'asking')
+  await fire(main, 'agent/status', { agent: ROOT, status: 'idle' })
+  assert.equal(read().state, 'waiting')
+  release()
+  assert.equal(await pending, 'allow', 'the real answer still reaches the asker')
+  assert.equal(read().state, 'waiting', 'the answer must not put a finished turn back to working')
+})
+
+await check('a turn starting again is what reports it working', async () => {
+  await fire(main, 'agent/status', { agent: ROOT, status: 'running' })
+  assert.equal(read().state, 'working')
+  assert.equal(read().reason, 'agent-running')
+})
+
 await check('a real change moves changedAt, and repeating the same state does not', async () => {
   const before = read()
   await sleep(5)

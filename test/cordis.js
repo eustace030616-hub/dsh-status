@@ -125,6 +125,16 @@ await check('a subagent turn end is ignored under real dispatch — no false gre
   assert.equal(read().sessionId, 'session-root')
 })
 
+await check('agent/status settles a stopped turn through the real emitter', async () => {
+  await ctx.emit('agent/status', { agent: ROOT_AGENT, status: 'running' })
+  assert.equal(read().state, 'working', 'a running agent is a working session')
+  // The stop path: no `agent/turn-stopping` is ever dispatched for an aborted turn.
+  await ctx.emit('agent/status', { agent: ROOT_AGENT, status: 'idle' })
+  const doc = read()
+  assert.equal(doc.state, 'waiting')
+  assert.equal(doc.reason, 'agent-idle')
+})
+
 await check('a subagent prompt is ignored under real dispatch — no false yellow', async () => {
   await ctx.waterfall(
     'agent/pre-step',
