@@ -15,6 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.11] - 2026-10-02
+
+### Changed
+
+- **The blocked pulse is now one second long and sweeps the whole range: 30% to 100%.** The flash is meant to
+  be the one thing on the strip that moves, and at 2.17 s between half and 95% it was neither quick enough to
+  catch the eye sideways nor bright enough at the top to stand out. `breathPeriod` 2.17 s → 1.0 s,
+  `breathFloor` 0.5 → 0.3, `breathPeak` 0.95 → 1.0. A Lit slider above the peak still raises it, and the floor
+  still gives way only for a slider set below the floor, so a dim slider is brightened by the pulse rather
+  than the pulse dimmed by it.
+- Measured on the rendered view, sampling the yellow lens' own alpha: **0.302 → 1.000** over **1.00 s**,
+  against 0.502 → 0.949 over 2.17 s. A steady lit lens is untouched at 0.851 and a resting one at 0.278, so
+  the trough now sits a shade above rest while the peak is as solid as a lens can be.
+
 ## [0.7.10] - 2026-10-02
 
 ### Changed

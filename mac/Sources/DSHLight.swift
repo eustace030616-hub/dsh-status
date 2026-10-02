@@ -488,11 +488,11 @@ struct Options {
           --size POINTS overrides the size slider for this run only.
 
           A finish rests as soon as DSH is in front: you are looking at it, so
-          the reminder has done its job. A session blocked on you breathes the
-          yellow lens rather than blinking. --ack-app adds another application
-          whose return counts; repeat it for several. The default is the
-          application named by --open. --no-ack keeps green until the next
-          prompt instead.
+          the reminder has done its job. A session blocked on you pulses the
+          yellow lens between a third and full solidity rather than blinking.
+          --ack-app adds another application whose return counts; repeat it for
+          several. The default is the application named by --open. --no-ack keeps
+          green until the next prompt instead.
 
       DSHLight --help
     """
@@ -633,7 +633,7 @@ struct Look {
     var gap: CGFloat
     /// How solid an unlit lens is.
     var restAlpha: Double
-    /// How solid the lit lens is, before the breath on top of it.
+    /// How solid the lit lens is, before the pulse on top of it.
     var litAlpha: Double
 
     static let lensRange: ClosedRange<Double> = 12...48
@@ -777,20 +777,15 @@ final class TrafficLightView: NSView {
     private static let rimGrey: CGFloat = 0.45
     private static let rimAlpha: CGFloat = 0.45
 
-    /// A slow breath rather than a blink: a session blocked on the user should
-    /// read as alive, not as an alarm. It never goes dark — the two ends are
-    /// **alphas**, not fractions of the Lit slider, because what the lens must
-    /// never fall below is a brightness in its own right.
-    private static let breathPeriod: Double = 2.17
-    /// Half solid at the dim end: a faint yellow still reads as a lit lens rather
-    /// than as a lens switching off.
-    private static let breathFloor: Double = 0.5
-    /// What a breathing lens peaks at, whatever the Lit slider says.
-    ///
-    /// Above the slider's default deliberately: at 0.85 against a steady lens of
-    /// the same 0.85 the flash read as no change at all, and blocked-on-you is the
-    /// one state that has to be noticed from across the room.
-    private static let breathPeak: Double = 0.95
+    /// A quick pulse rather than a slow breath: a session blocked on the user is
+    /// the one state that has to be noticed from across the room. It never goes
+    /// dark — the two ends are **alphas**, not fractions of the Lit slider, because
+    /// what a lens must never fall below is a brightness in its own right.
+    private static let breathPeriod: Double = 1.0
+    /// The dim end of the pulse: a third solid.
+    private static let breathFloor: Double = 0.3
+    /// What a pulsing lens peaks at, whatever the Lit slider says: fully solid.
+    private static let breathPeak: Double = 1.0
     private var breathEpoch = Date()
     private var breathTimer: Timer?
 
@@ -802,7 +797,7 @@ final class TrafficLightView: NSView {
         reading.light == .asking
     }
 
-    /// A redraw clock that runs only while something is breathing.
+    /// A redraw clock that runs only while something is pulsing.
     private func updateBreathing() {
         if needsBreathing, breathTimer == nil {
             breathEpoch = Date()
@@ -817,8 +812,8 @@ final class TrafficLightView: NSView {
         }
     }
 
-    /// How far into the breath we are: 0 at the trough, 1 at the crest. A lens
-    /// that is not breathing sits at 1 — full solidity, nothing animating.
+    /// How far into the pulse we are: 0 at the trough, 1 at the crest. A lens
+    /// that is not pulsing sits at 1 — full solidity, nothing animating.
     private func level(for lens: Lens) -> Double {
         guard lens == .yellow, needsBreathing else { return 1 }
         let phase = Date().timeIntervalSince(breathEpoch)
@@ -828,7 +823,7 @@ final class TrafficLightView: NSView {
 
     /// The alpha of a lit lens at this instant.
     ///
-    /// A lens that is not breathing is the Lit slider. A breathing one sweeps
+    /// A lens that is not pulsing is the Lit slider. A pulsing one sweeps
     /// between `breathFloor` and the brighter of the Lit slider and `breathPeak`:
     /// a slider set above the peak raises it, and the floor follows only if the
     /// slider is set below the floor.

@@ -46,7 +46,7 @@ The file is the entire interface between the two halves.
 |---|---|
 | all three lenses dark | rest (`idle`): nothing is pending |
 | yellow, steady | a session is working |
-| yellow, breathing | a session is blocked on you (`asking`) — a 2.17 s breath between 50% and 95%, so it out-reads the steady lit lens (85% by default) without ever looking switched off |
+| yellow, pulsing | a session is blocked on you (`asking`) — a 1 s pulse between 30% and 100%, so it is the one thing on the strip that moves |
 | green | a finish you have not read (`waiting`) |
 | red | the feed itself cannot be trusted |
 
@@ -54,7 +54,7 @@ Red is reserved for the feed — the file is gone, unreadable or stale, so nothi
 session. Dark means the feed is healthy and says nothing is pending. A reader that meets a state it has
 never heard of rests rather than alarms, so adding one later cannot make an older renderer cry wolf.
 `--print` labels the same states with one character each — ⚪ 🟡 🟢 🔵 🔴 — and reads `asking` as 🔵 where the
-window breathes the yellow lens.
+window pulses the yellow lens.
 
 **With several sessions** the publisher reports each one in `meta.sessions` and the renderer aggregates,
 because only the renderer knows what you have already read: a blocked session outranks a finish, a finish
@@ -78,7 +78,7 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 | → `idle` | plugin load, a session coming up, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching between live sessions emits no event at all, so the acknowledgement it counts as happens on the Mac, not here. |
 | → `working` | `agent/pre-step` with a non-empty `messages` | The only verified signal that a prompt was actually accepted. The empty case is the ordinary between-steps pass and is ignored. |
 | → `waiting` | `agent/turn-stopping` | The turn is about to close and is waiting on the user. |
-| → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light keeps breathing until the last one is answered. |
+| → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light keeps pulsing until the last one is answered. |
 | *(ignored)* | a turn event on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. An ask is the exception: it is charged to the parent session, because the human is still the one who answers. |
 
 Two further safety properties:
