@@ -187,14 +187,18 @@ Three properties worth keeping:
   keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
   has not learned yet are all rest, and the reminder green is what stands out because nothing else
   competes with it.
-- **The gesture is a double-click, so a stray click can never move you.** Green (finished), blue
-  (blocked on an answer) and red (no signal) bring DSH forward, because something needs you. Grey
-  (rest) and yellow (working) **toggle**: if DSH is in front they put you back in the application you came from, and if
-  it is not they bring DSH forward — one control for both directions, so the light is a way in as well
-  as a way out. When there is nowhere to return to it says so rather than silently doing nothing. It restores the *application*, which is as far as public API reaches — macOS
-  will not let one application select another's window or browser tab — but that is what "back to my
-  work" means: VSCode returns to the window being edited, the browser to the tab being read. Neither
-  DSH nor the light itself is ever remembered, since returning to either would be a no-op.
+- **The gesture is a double-click, and it only navigates.** Whatever colour is showing, it switches
+  between DSH and the application you came from — forward when DSH is not in front, back when it is.
+  The colour answers *"should I go?"*; the click does the going, so you never have to read the light to
+  know what a click will do. A single click is inert, so a stray one cannot move you, and when there is
+  nowhere to return to it says so rather than silently doing nothing.
+- **Arriving is what acknowledges.** A finish settles when DSH comes to the front, because the watcher
+  sees that happen — so the click needs to know nothing about state, and a reminder cannot be left
+  hanging by a gesture that forgot to clear it.
+- **It restores the application, not the window or tab.** That is as far as public API reaches: macOS
+  will not let one application select another's window or browser tab. In practice it is what "back to
+  my work" means — VSCode returns to the window being edited, the browser to the tab being read.
+  Neither DSH nor the light itself is ever remembered, since returning to either would be a no-op.
 - **Green retires itself when you come back.** The publisher cannot know this: switching between
   live sessions emits no agent event at all — verified by recording the state file across a switch,
   which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives

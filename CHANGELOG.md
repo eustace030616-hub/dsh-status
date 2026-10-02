@@ -63,6 +63,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   returning the real answerer's result untouched; concurrent asks are counted, and the light stays
   blue until the last one is answered. Deliberately not root-filtered — a subagent's approval still
   needs the human — which is the one place the root filter does not apply.
+- **The double-click navigates and nothing else.** It switches between DSH and the application the
+  user came from, in whichever direction they are pointing, *whatever colour is showing*. State no
+  longer decides what a click does: the colour answers "should I go?", the click does the going. The
+  acknowledgement follows from that — arriving at DSH is what settles a finish — so the gesture needs
+  no knowledge of state at all.
 - **Every click action now needs a double-click.** A single click is inert, so a stray one while the
   user is working elsewhere cannot take their screen; and the gesture is explicit, which also removes
   the race where two quick clicks could land in either application depending on whether the first

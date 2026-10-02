@@ -328,8 +328,9 @@ struct Options {
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
                [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
-          apps. DOUBLE-CLICK it to move between DSH and the application you came
-          from; drag it to reposition. A single click does nothing on purpose.
+          apps. DOUBLE-CLICK it to switch between DSH and the application you
+          came from, whatever colour is showing; drag it to reposition. A single
+          click does nothing on purpose.
           LEVEL is floating, status or screensaver (default screensaver).
 
           A green finish rests as soon as you come back to DSH — either by
@@ -436,7 +437,7 @@ func runPrintMode(_ options: Options) {
         } else {
             to = acknowledgement.map { _ in "dsh" } ?? "dsh (acknowledgement off)"
         }
-        let clickLine = "[double-click on rest/working: \(from) -> \(to)]"
+        let clickLine = "[double-click: \(from) -> \(to)]"
         if clickLine != announcedReturn {
             announcedReturn = clickLine
             print("  \(clickLine)")
@@ -571,30 +572,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = DotView(frame: NSRect(x: 0, y: 0, width: side, height: side))
         view.onTap = { [weak self] in
-            guard let self, let light = self.view?.reading.light else { return }
-            // A click means "take me to what needs me", and then "put me back":
-            // the light is a toggle between the answer and the work.
-            switch light {
-            case .waiting:
-                // Finished and unread: go and read it. Clicking is also a
-                // deliberate "take me there", so it settles the reminder even
-                // when DSH was already in front and no switch will be seen.
-                self.acknowledgement?.acknowledge()
-                self.refresh()
+            guard let self else { return }
+            // The gesture navigates and nothing else: it moves between DSH and
+            // the application the user came from, whichever way they are
+            // pointing and whatever colour is showing. The colour answers
+            // "should I go?"; the click only does the going, so the user never
+            // has to read the light before deciding what a click will do.
+            //
+            // It needs no knowledge of state because arriving at DSH *is* what
+            // acknowledges a finish — the frontmost watcher sees it — so the
+            // reminder settles on its own.
+            if self.acknowledgement?.isLookingAtTarget == true {
+                self.acknowledgement?.returnToLastOther()
+            } else {
                 self.bringHarnessForward()
-            case .asking, .broken:
-                // Blocked on an answer, or the feed is broken: go and look.
-                self.bringHarnessForward()
-            case .idle, .working:
-                // Rest, or working: nothing here needs the user, so the click
-                // moves them between DSH and the application they came from —
-                // whichever way they are pointing at that moment. One control
-                // for both directions, rather than only a way out.
-                if self.acknowledgement?.isLookingAtTarget == true {
-                    self.acknowledgement?.returnToLastOther()
-                } else {
-                    self.bringHarnessForward()
-                }
             }
         }
         view.onMove = { origin in
