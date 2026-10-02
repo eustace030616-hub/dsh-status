@@ -174,12 +174,22 @@ enum TargetApp {
 /// Two ways to acknowledge, because both mean "I am back":
 ///   - the frontmost application *becomes* DSH (switching back to it), and
 ///   - clicking the light, which is a deliberate "take me there".
+///
+/// The same poll also remembers the last application that was *not* DSH, so a
+/// click on a resting light can put the user back where they were. One watcher
+/// for both, because it is the same observation — who is in front right now.
 final class Acknowledgement {
     private static let storedKey = "DSHLight.acknowledgedAt"
 
     private let targets: Set<String>
     private var previousFrontmost: String?
     private(set) var at: Date?
+    /// The last application the user was in that was not DSH. Restoring the
+    /// application is as far as public API reaches — macOS will not let one
+    /// application select another's window or browser tab — but it is what
+    /// "back to my work" means: VSCode returns to the window being edited, the
+    /// browser to the tab being read.
+    private(set) var lastOther: (bundleId: String, url: URL)?
 
     init(targets: Set<String>, fallbackAppPath: String) {
         var resolved = targets
@@ -201,12 +211,33 @@ final class Acknowledgement {
     /// stays in DSH does not keep re-acknowledging.
     @discardableResult
     func poll() -> Bool {
-        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        defer { previousFrontmost = frontmost }
-        guard let frontmost, frontmost != previousFrontmost, targets.contains(frontmost) else {
+        let front = NSWorkspace.shared.frontmostApplication
+        let identifier = front?.bundleIdentifier
+        defer { previousFrontmost = identifier }
+
+        // Remember where the user was. Neither DSH nor the light itself is ever
+        // remembered: returning to either would be a no-op, and the light *does*
+        // briefly become frontmost when it is launched, which is enough to make
+        // it remember itself and break the return click entirely.
+        if let identifier, !targets.contains(identifier), identifier != Bundle.main.bundleIdentifier,
+           let url = front?.bundleURL {
+            lastOther = (identifier, url)
+        }
+
+        guard let identifier, identifier != previousFrontmost, targets.contains(identifier) else {
             return false
         }
         acknowledge()
+        return true
+    }
+
+    /// Put the user back in the application they were in before DSH.
+    @discardableResult
+    func returnToLastOther() -> Bool {
+        guard let lastOther else { return false }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: lastOther.url, configuration: configuration)
         return true
     }
 
@@ -384,8 +415,15 @@ func runPrintMode(_ options: Options) {
     }
     let finishes = FinishTracker()
     var previous: String?
+    var announcedReturn: String?
     while true {
         acknowledgement?.poll()
+        // What a click would do right now, so the rule is visible without
+        // clicking — and so this can be checked without a mouse.
+        if let other = acknowledgement?.lastOther?.bundleId, other != announcedReturn {
+            announcedReturn = other
+            print("  [a click on rest or working would return to \(other)]")
+        }
         let raw = StateFile.read(at: options.statePath)
         let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
         if reading.signature != previous {
@@ -511,19 +549,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = DotView(frame: NSRect(x: 0, y: 0, width: side, height: side))
         view.onTap = { [weak self] in
             guard let self, let light = self.view?.reading.light else { return }
-            // The light only calls for the user when it is green (finished),
-            // blue (blocked on an answer) or red (no signal). On grey or yellow
-            // the user is mid-task, and a click must not take the screen away
-            // from whatever they are doing — so the click does nothing at all.
-            guard light == .waiting || light == .asking || light == .broken else { return }
-            if light == .waiting {
-                // Clicking is also a deliberate "take me there", so it settles
-                // the reminder even when DSH was already in front and no switch
-                // will be seen.
+            // A click means "take me to what needs me", and then "put me back":
+            // the light is a toggle between the answer and the work.
+            switch light {
+            case .waiting:
+                // Finished and unread: go and read it. Clicking is also a
+                // deliberate "take me there", so it settles the reminder even
+                // when DSH was already in front and no switch will be seen.
                 self.acknowledgement?.acknowledge()
+                self.refresh()
+                self.bringHarnessForward()
+            case .asking, .broken:
+                // Blocked on an answer, or the feed is broken: go and look.
+                self.bringHarnessForward()
+            case .idle, .working:
+                // Rest, or working: nothing here needs the user, so the click
+                // returns them to whatever they were doing instead.
+                self.acknowledgement?.returnToLastOther()
             }
-            self.refresh()
-            self.bringHarnessForward()
         }
         view.onMove = { origin in
             UserDefaults.standard.set([origin.x, origin.y], forKey: AppDelegate.originKey)

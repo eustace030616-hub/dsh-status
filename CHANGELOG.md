@@ -63,9 +63,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   returning the real answerer's result untouched; concurrent asks are counted, and the light stays
   blue until the last one is answered. Deliberately not root-filtered — a subagent's approval still
   needs the human — which is the one place the root filter does not apply.
-- **A click now depends on the light.** Green, blue and red bring DSH forward, because something
-  finished, is blocked, or is broken. Grey and yellow do nothing, so a click while the user is
-  mid-task elsewhere cannot steal their screen.
+- **A click toggles between the answer and the work.** Green, blue and red bring DSH forward, because
+  something finished, is blocked, or is broken. Grey and yellow return the user to the application
+  they were in before DSH. It restores the application rather than the window or tab — as far as
+  public API reaches — and remembers neither DSH nor the light itself, since returning to either
+  would be a no-op. Found while testing: the light *does* briefly become frontmost when it launches,
+  which was enough for it to remember itself and make the return click do nothing.
 - **Acknowledgement by return.** A green finish settles to grey once the user is back at DSH — either
   by switching to it or by clicking the light — because the reminder has been served. The
   acknowledgement is Mac-side (the harness has no idea which window is in front), it is stored, and it

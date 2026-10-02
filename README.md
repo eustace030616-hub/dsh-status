@@ -186,9 +186,13 @@ Three properties worth keeping:
   keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
   has not learned yet are all rest, and the reminder green is what stands out because nothing else
   competes with it.
-- **A click only takes the screen when the light is asking for you.** Green (finished), blue (blocked
-  on an answer) and red (no signal) bring DSH forward; clicking on grey or yellow does nothing at all,
-  so a stray click while you are mid-task in another window cannot move you.
+- **A click means "take me to what needs me", then "put me back".** Green (finished), blue (blocked on
+  an answer) and red (no signal) bring DSH forward, because something needs you. Grey (rest) and yellow
+  (working) return you to the application you were in before DSH, so the light is a toggle between the
+  answer and the work. It restores the *application*, which is as far as public API reaches — macOS
+  will not let one application select another's window or browser tab — but that is what "back to my
+  work" means: VSCode returns to the window being edited, the browser to the tab being read. Neither
+  DSH nor the light itself is ever remembered, since returning to either would be a no-op.
 - **Green retires itself when you come back.** The publisher cannot know this: switching between
   live sessions emits no agent event at all — verified by recording the state file across a switch,
   which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives
