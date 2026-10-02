@@ -46,7 +46,7 @@ The file is the entire interface between the two halves.
 |---|---|
 | all three lenses dark | rest (`idle`): nothing is pending |
 | yellow, steady | a session is working |
-| yellow, breathing | a session is blocked on you (`asking`) — alive, not an alarm |
+| yellow, breathing | a session is blocked on you (`asking`) — a 2.17 s breath peaking at 95%, so it out-reads the steady lit lens (85% by default); alive rather than alarming |
 | green | a finish you have not read (`waiting`) |
 | red | the feed itself cannot be trusted |
 

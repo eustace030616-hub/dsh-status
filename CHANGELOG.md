@@ -15,6 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-10-02
+
+### Changed
+
+- **The blocked breath is much easier to see: it peaks at 95% and runs 20% faster.** The flash was drawn at
+  the Lit slider's own value, so at its brightest it was exactly the lens a working session shows — only the
+  movement said anything, and against a bright wallpaper it read as a slow fade at best. A breathing lens now
+  peaks at `breathPeak` (0.95) whatever the slider says, and the breath period goes from 2.6 s to 2.17 s. A
+  slider set brighter than 0.95 still wins: breathing must never be the dimmer of the two. Both are constants
+  rather than settings, so every install gets them and there is nothing to remember or reset.
+- Measured on the rendered view, sampling the yellow lens' own alpha: the breath now sweeps **0.239 → 0.949**
+  over **2.17 s**, against 0.213 → 0.850 before, while the steady lit lens is untouched at 0.851 and a resting
+  one at 0.278. With the Lit slider at 100%, breathing peaks at 1.000 and the steady lens matches it.
+
 ## [0.7.8] - 2026-10-02
 
 ### Changed

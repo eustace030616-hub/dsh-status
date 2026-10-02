@@ -779,8 +779,14 @@ final class TrafficLightView: NSView {
 
     /// A slow breath rather than a blink: a session blocked on the user should
     /// read as alive, not as an alarm. It never goes fully dark.
-    private static let breathPeriod: Double = 2.6
+    private static let breathPeriod: Double = 2.17
     private static let breathFloor: Double = 0.25
+    /// What a breathing lens peaks at, whatever the Lit slider says.
+    ///
+    /// Above the slider's default deliberately: at 0.85 against a steady lens of
+    /// the same 0.85 the flash read as no change at all, and blocked-on-you is the
+    /// one state that has to be noticed from across the room.
+    private static let breathPeak: Double = 0.95
     private var breathEpoch = Date()
     private var breathTimer: Timer?
 
@@ -813,6 +819,16 @@ final class TrafficLightView: NSView {
         let phase = Date().timeIntervalSince(breathEpoch)
             .truncatingRemainder(dividingBy: Self.breathPeriod) / Self.breathPeriod
         return Self.breathFloor + (1 - Self.breathFloor) * (0.5 + 0.5 * sin(2 * .pi * phase))
+    }
+
+    /// How solid a lit lens is at this instant: the Lit slider, except that a
+    /// breathing lens peaks at `breathPeak` instead. A slider set brighter than
+    /// that wins — breathing must never be the dimmer of the two.
+    private func solidity(of lens: Lens, level: Double) -> Double {
+        let peak = lens == .yellow && needsBreathing
+            ? max(Double(look.litAlpha), Self.breathPeak)
+            : Double(look.litAlpha)
+        return peak * level
     }
 
     /// Which lens is lit, if any. Rest is every lens dark, which is what a real
@@ -875,7 +891,7 @@ final class TrafficLightView: NSView {
     private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double) {
         let colour = colour(of: lens)
         if lit {
-            colour.withAlphaComponent(CGFloat(look.litAlpha) * level).setFill()
+            colour.withAlphaComponent(CGFloat(solidity(of: lens, level: level))).setFill()
         } else {
             // A resting lens is dark glass, not a hole: visible enough that the
             // traffic light still reads as one when nothing is lit. Its solidity
