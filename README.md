@@ -204,7 +204,14 @@ To follow the light in a terminal instead — printed once, then only when it ch
 
 The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
-and dark appearance on its own.
+and dark appearance on its own. The body is **thirty percent fainter than the material** (`bodyOpacity`,
+0.7), which is a hint of a body rather than a panel with a light standing in it.
+
+The body and the light are **siblings, not parent and child**. They were nested until the body needed to be
+fainter than opaque, and a view's alpha applies to everything inside it: the lenses would have faded along
+with the square behind them. The body's corner radius is taken from its **narrow** side, so a tall light is
+a rounded square — the radius used to come from the height, which was the narrow side back when the light
+could lie down.
 
 The light is a **traffic light**: three lenses stacked, red at the top. It has one shape, and it **docks to
 whichever side of the screen is nearer** when dropped — left or right, remembered — sliding up and down

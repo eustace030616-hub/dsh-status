@@ -616,6 +616,14 @@ struct Look {
         let breadth = lens + 2 * padding
         return NSSize(width: breadth, height: length)
     }
+
+    /// The body's corner radius, taken from the **narrow** side so a tall light
+    /// gets a rounded square rather than a lozenge. It used to be taken from the
+    /// height, which was the narrow side back when the light could lie down: at
+    /// 32 points wide, a radius of 14 leaves four points of straight edge.
+    var cornerRadius: CGFloat {
+        min(14, min(size.width, size.height) * 0.32)
+    }
 }
 
 /// One slider of the list, declared as a case so that its label, its range, its
@@ -894,6 +902,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var side: ScreenSide = .right
     /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
+    /// How solid the grey body behind the lenses is, against the material's own
+    /// full strength: thirty percent fainter, so it reads as a hint of a body
+    /// rather than as a panel with a light standing in it.
+    private static let bodyOpacity: CGFloat = 0.7
     /// How far above the point passed to `popUp` the top of the list lands.
     ///
     /// Measured, not documented: a menu is placed by its top-left corner, and
@@ -946,16 +958,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = false
 
-        // The backdrop is the same material a menu uses, so the right-click list
+        // The body is the same material a menu uses, so the right-click list
         // reads as an extension of the light instead of a separate object. It
         // also gives the light a faint grey body on any wallpaper, and follows
         // light and dark appearance on its own.
+        //
+        // The body and the light are **siblings, not parent and child**. They
+        // were nested until the body needed to be fainter than opaque, and a
+        // view's alpha applies to everything inside it: the lenses would have
+        // faded along with the square behind them. A plain container holds both,
+        // and the body is faded on its own.
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
         let backdrop = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
         backdrop.material = .menu
         backdrop.blendingMode = .behindWindow
         backdrop.state = .active
+        backdrop.alphaValue = Self.bodyOpacity
+        backdrop.autoresizingMask = [.width, .height]
         backdrop.wantsLayer = true
-        backdrop.layer?.cornerRadius = min(14, size.height * 0.32)
+        backdrop.layer?.cornerRadius = look.cornerRadius
         backdrop.layer?.masksToBounds = true
 
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
@@ -964,8 +985,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
-        backdrop.addSubview(view)
-        window.contentView = backdrop
+        container.addSubview(backdrop)
+        container.addSubview(view)
+        window.contentView = container
 
         window.setFrameOrigin(restoredOrigin(size: size))
         window.orderFrontRegardless()
@@ -1050,7 +1072,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // tuned for one shape is a circle on a small light and a square on a
         // large one.
         view?.look = look
-        backdrop?.layer?.cornerRadius = min(14, want.height * 0.32)
+        backdrop?.layer?.cornerRadius = look.cornerRadius
 
         UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey)
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)

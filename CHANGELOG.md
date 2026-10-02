@@ -15,6 +15,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-02
+
+### Changed
+
+- **The grey body behind the lenses is thirty percent fainter** — `bodyOpacity`, 0.7 against the material's
+  own strength. The body and the light are **siblings now rather than parent and child**: a view's alpha
+  applies to everything inside it, so leaving the lenses nested in the body would have faded them with it.
+- **The body's corner radius comes from its narrow side.** It was taken from the height, which was the narrow
+  side back when the light could lie down; a 32-point-wide body with a radius of 14 is a lozenge with four
+  points of straight edge, not the rounded square it is meant to be.
+
 ## [0.6.3] - 2026-10-02
 
 ### Changed
