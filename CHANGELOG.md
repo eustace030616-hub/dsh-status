@@ -15,6 +15,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-02
+
+### Fixed
+
+- **The right-click list opened a menu-height away from a light docked to the top or bottom edge.**
+  `popUp(positioning:at:in:)` puts the menu's *top-left* corner at the given point; the placement math
+  read those y values as the menu's bottom, so a horizontal light got a gap exactly the height of the
+  list. A side-docked light was unaffected because the two tops line up anyway, which is why it only
+  showed horizontally. The list is also clamped inside the visible frame now, so no border can open one
+  off the screen.
+
+## [0.5.4] - 2026-10-02
+
 ## [0.5.4] - 2026-10-02
 
 ### Changed

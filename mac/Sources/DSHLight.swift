@@ -1054,20 +1054,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The list hangs inward from the border the light is docked to, so a docked
     /// light never opens a menu off the edge of the screen.
+    ///
+    /// `popUp(positioning:at:in:)` puts the menu's **top-left** corner at the
+    /// point, so every y below is the menu's *top*, not its bottom. Reading them
+    /// as the bottom is what left a gap the height of the menu beneath a light
+    /// docked to the top or bottom edge — and only there, because a side-docked
+    /// light lines the two tops up anyway.
     private func showMenu() {
         guard let window else { return }
         let menu = buildMenu()
         let frame = window.frame
         let width = menu.size.width
         let height = menu.size.height
-        let anchor: NSPoint
+
+        var point: NSPoint
         switch border {
-        case .right: anchor = NSPoint(x: frame.minX - width, y: frame.maxY)
-        case .left: anchor = NSPoint(x: frame.maxX, y: frame.maxY)
-        case .top: anchor = NSPoint(x: frame.minX, y: frame.minY - height)
-        case .bottom: anchor = NSPoint(x: frame.minX, y: frame.maxY)
+        case .right: point = NSPoint(x: frame.minX - width, y: frame.maxY)
+        case .left: point = NSPoint(x: frame.maxX, y: frame.maxY)
+        case .top: point = NSPoint(x: frame.minX, y: frame.minY)
+        case .bottom: point = NSPoint(x: frame.minX, y: frame.maxY + height)
         }
-        menu.popUp(positioning: nil, at: anchor, in: nil)
+
+        // And keep the whole list on the screen it was opened from.
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        let margin: CGFloat = 4
+        let lowest = visible.minY + height + margin
+        point.x = min(max(point.x, visible.minX + margin), max(visible.minX + margin, visible.maxX - width - margin))
+        point.y = min(max(point.y, lowest), max(lowest, visible.maxY - margin))
+
+        menu.popUp(positioning: nil, at: point, in: nil)
     }
 
     /// Groups in one list, so a future feature is one entry — and a single
