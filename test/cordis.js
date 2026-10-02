@@ -74,7 +74,7 @@ await fork
 
 await check('the module mounts as a cordis plugin and publishes init', () => {
   const doc = read()
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'init')
 })
 
@@ -85,7 +85,7 @@ await check('ctx.logger is a real service (the writer has somewhere to warn)', (
 await check('agent/created through the real emitter records the session', async () => {
   ctx.emit('agent/created', { agent: ROOT_AGENT, source: 'web' })
   const doc = read()
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.sessionId, 'session-root')
   assert.deepEqual(doc.meta, { cwd: '/tmp/project' })
 })
@@ -136,7 +136,7 @@ await check('a subagent prompt is ignored under real dispatch — no false yello
 await check('fiber disposal runs the effect disposer and clears the session', async () => {
   await fork.dispose()
   const doc = read()
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'dispose')
   assert.equal(doc.sessionId, null)
 })

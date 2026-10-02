@@ -16,10 +16,29 @@ import Cocoa
 
 // MARK: - The contract
 
+/// What the dot can show.
+///
+/// Three of these are states the publisher reports; `broken` is not — it is the
+/// renderer saying *the feed itself* cannot be trusted (no file, unreadable,
+/// stale). Keeping "I cannot tell" apart from "nothing is happening" is the
+/// whole point: a session switch is rest, not an alarm.
 enum Light: String {
-    case unknown
+    case idle
     case working
     case waiting
+    case broken
+
+    /// Fold a published `state` onto a light. Anything unrecognised becomes
+    /// `idle`, never `broken`, so adding a state later can never make an older
+    /// renderer cry wolf — and a legacy `unknown` from an older publisher reads
+    /// as rest rather than as failure.
+    init(published: String) {
+        switch published {
+        case "working": self = .working
+        case "waiting": self = .waiting
+        default: self = .idle
+        }
+    }
 }
 
 /// How many heartbeats may pass before the feed is called dead.
@@ -39,28 +58,31 @@ struct Reading {
     /// The heartbeat expired: the last state is no longer a claim about now.
     var stale = false
 
-    static func unresolved(_ detail: String) -> Reading {
-        Reading(light: .unknown, detail: detail, sessionId: nil, age: nil)
+    /// The feed is unusable, however readable it was.
+    static func broken(_ detail: String) -> Reading {
+        Reading(light: .broken, detail: detail, sessionId: nil, age: nil)
     }
 
     /// What counts as a change worth reporting. The age is excluded on purpose:
     /// it grows every tick, and a follower that reported it would reprint the
-    /// same red line forever instead of going quiet until something happens.
+    /// same line forever instead of going quiet until something happens.
     var signature: String { "\(light.rawValue)|\(detail)" }
 
     var symbol: String {
         switch light {
-        case .unknown: return "🔴"
+        case .idle: return "⚪"
         case .working: return "🟡"
         case .waiting: return "🟢"
+        case .broken: return "🔴"
         }
     }
 
     var label: String {
         switch light {
-        case .unknown: return "unknown"
+        case .idle: return "idle"
         case .working: return "working"
         case .waiting: return "waiting"
+        case .broken: return "no signal"
         }
     }
 }
@@ -70,11 +92,11 @@ enum StateFile {
     /// throwing: a renderer must be able to draw "I cannot tell" as red.
     static func read(at path: String, now: Date = Date()) -> Reading {
         guard let data = FileManager.default.contents(atPath: path) else {
-            return .unresolved("no file")
+            return .broken("no file")
         }
         guard let root = try? JSONSerialization.jsonObject(with: data),
               let object = root as? [String: Any] else {
-            return .unresolved("unreadable")
+            return .broken("unreadable")
         }
 
         let heartbeatMs = (object["heartbeatMs"] as? NSNumber)?.doubleValue ?? fallbackHeartbeatMs
@@ -83,7 +105,7 @@ enum StateFile {
         let sessionId = object["sessionId"] as? String
 
         guard let updatedAtMs else {
-            return .unresolved("no timestamp")
+            return .broken("no timestamp")
         }
 
         let age = now.timeIntervalSince1970 - updatedAtMs / 1000
@@ -94,7 +116,7 @@ enum StateFile {
             // so the last state is no longer a claim about right now. The
             // detail stays free of the live age so the signature is stable.
             return Reading(
-                light: .unknown,
+                light: .broken,
                 detail: String(format: "stale (heartbeat %.1fs)", heartbeatMs / 1000),
                 sessionId: sessionId,
                 age: age,
@@ -102,10 +124,9 @@ enum StateFile {
             )
         }
 
-        let state = object["state"] as? String ?? ""
-        guard let light = Light(rawValue: state) else {
-            return .unresolved("unknown state \"\(state)\"")
-        }
+        // An unrecognised value is rest, not failure: the feed is healthy and
+        // simply says something this build has not learned yet.
+        let light = Light(published: object["state"] as? String ?? "")
         return Reading(light: light, detail: reason, sessionId: sessionId, age: age)
     }
 }
@@ -182,9 +203,10 @@ private func coloured(_ text: String, _ light: Light) -> String {
     guard stdoutIsTerminal else { return text }
     let code: String
     switch light {
-    case .unknown: code = "31"  // red
+    case .idle: code = "90"  // grey
     case .working: code = "33"  // yellow
     case .waiting: code = "32"  // green
+    case .broken: code = "31"  // red
     }
     return "\u{001B}[\(code)m\(text)\u{001B}[0m"
 }
@@ -222,7 +244,7 @@ func runPrintMode(_ options: Options) {
 // MARK: - Window mode
 
 final class DotView: NSView {
-    var reading = Reading.unresolved("starting") {
+    var reading = Reading.broken("starting") {
         didSet { needsDisplay = true }
     }
     var onTap: (() -> Void)?
@@ -234,9 +256,10 @@ final class DotView: NSView {
 
     private func colour(for light: Light) -> NSColor {
         switch light {
-        case .unknown: return .systemRed
+        case .idle: return .systemGray
         case .working: return .systemYellow
         case .waiting: return .systemGreen
+        case .broken: return .systemRed
         }
     }
 

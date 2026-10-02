@@ -15,13 +15,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **`idle` replaces `unknown` as the published rest state, and rest is grey rather than red.** The
+  old vocabulary had one word for two different things: a session switch or a fresh boot reported
+  `unknown`, which readers drew as red — so the light cried wolf in the least alarming moment there
+  is. The publisher now reports `idle` (rest), and the renderer reserves **red for the feed itself
+  being broken**: no file, unreadable, no timestamp, or a heartbeat that stopped. Grey means the feed
+  is healthy and nothing is pending.
+- **An unrecognised `state` now degrades to rest, never to red.** A renderer that meets a value it has
+  never heard of says "not something I know", not "something is wrong" — so adding a state later can
+  never make an older renderer alarm. A legacy `unknown` therefore reads as grey too, which fixes the
+  red flash on session switch even before the publisher is updated.
+- Green keeps its meaning as an **unacknowledged** finish. Switching sessions or sending the next
+  prompt ends it, which is what "the green has reached its goal" means in practice; tapping the light
+  deliberately does *not* clear it, because a glance is not the same as having read the answer.
+
 ### Added
 
 - **Stage 2 — the renderer (`mac/`).** `DSHLight.app`, a universal ad-hoc-signed dot that reads the
-  state document and draws red (unknown or stale), yellow (working) or green (waiting) above every
-  window, on every Space, and over another application's fullscreen window. It clicks through to DSH
-  and drags to reposition, remembering the position; a display that disappears cannot strand it
-  off-screen. `./mac/build.sh` produces the bundle; it needs no Apple Developer account.
+  state document and draws yellow (working), green (finished, unacknowledged), grey (rest) or red
+  (broken feed) above every window, on every Space, and over another application's fullscreen window.
+  It clicks through to DSH and drags to reposition, remembering the position; a display that
+  disappears cannot strand it off-screen. `./mac/build.sh` produces the bundle; it needs no Apple
+  Developer account.
 - **`--print` mode**, a persistent follower for inspecting the light without a window: it prints the
   current light at once, then only when the light or its reason changes. Colour is emitted only when
   stdout is a terminal.

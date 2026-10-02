@@ -31,7 +31,7 @@ while the other did not exist.
 | Field | Meaning |
 |---|---|
 | `version` | Contract version. Bumped **only** for a breaking change. |
-| `state` | `unknown` \| `working` \| `waiting`. |
+| `state` | `idle` \| `working` \| `waiting`. |
 | `sessionId` | Session being reported on, or `null`. |
 | `title` | Session title, or `null` (see *Known gaps*). |
 | `updatedAt` | ms epoch. Re-stamped every `heartbeatMs` even when nothing changes. |
@@ -43,9 +43,15 @@ while the other did not exist.
 
 | What the renderer sees | Light |
 |---|---|
-| file missing/unparseable, or `now - updatedAt > 3 × heartbeatMs` | 🔴 red |
+| file missing/unparseable, no timestamp, or `now - updatedAt > 3 × heartbeatMs` | 🔴 red — *the feed is broken* |
 | `state: "working"` | 🟡 yellow |
-| `state: "waiting"` | 🟢 green |
+| `state: "waiting"` | 🟢 green — *the turn is over; nobody has looked yet* |
+| `state: "idle"`, a legacy `"unknown"`, or **any value this build does not know** | ⚪ grey — *rest* |
+
+The split between red and grey is the important one. **Red means the feed itself cannot be trusted**
+— the file is gone, unreadable or stale, so nothing can be said about the session. **Grey means the
+feed is healthy and says nothing is pending.** A reader that meets a state it has never heard of
+degrades to grey, never to red: adding a state later must not make older renderers cry wolf.
 
 **Extension rule (how future features land without breaking stage 2).** New information — latest
 prompt cost, token counts, model name, a prompt preview for hover — goes into `meta`. New top-level
@@ -59,7 +65,7 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 
 | Transition | Trigger | Why |
 |---|---|---|
-| → `unknown` | plugin load, and on dispose | Nothing known yet; and a disposed publisher must not keep claiming a session. |
+| → `idle` | plugin load, a session coming up or being switched to, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching sessions is how a user acknowledges a green: the reminder has done its job. |
 | → `working` | `agent/pre-step` with a non-empty `messages` | The only verified signal that a prompt was actually accepted. The empty case is the ordinary between-steps pass and is ignored. |
 | → `waiting` | `agent/turn-stopping` | The turn is about to close and is waiting on the user. |
 | *(ignored)* | any of the above on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. |
@@ -137,10 +143,10 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 
 ## Stage 2 — the renderer
 
-`mac/` builds **DSHLight.app**: one dot that reads the state document and shows red (unknown or
-stale), yellow (working) or green (waiting) above every window, on every Space, and over another
-application's fullscreen window. Click it to bring DSH forward; drag it to move it, and it remembers
-where you left it.
+`mac/` builds **DSHLight.app**: one dot that reads the state document and shows yellow (working),
+green (the turn is over and nobody has looked yet), grey (rest) or red (the feed itself is broken)
+above every window, on every Space, and over another application's fullscreen window. Click it to
+bring DSH forward; drag it to move it, and it remembers where you left it.
 
 ```bash
 ./mac/build.sh              # universal binary, ad-hoc signed, into ./build
@@ -169,6 +175,9 @@ Three properties worth keeping:
   publisher or the session.
 - **A dead feed is red, not the last colour.** The heartbeat is what makes that possible — without
   it, a killed DSH would leave a green light claiming the agent had finished.
+- **Rest is grey, not red.** Red is reserved for a feed that cannot be trusted, so it stays rare and
+  keeps its meaning. A session switch, a fresh boot, or a state this build has not learned yet are
+  all rest, and the reminder green is what stands out because nothing else competes with it.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
   package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
 
@@ -197,7 +206,7 @@ done
 
 > `watch` is a Linux tool and is not shipped with macOS — `brew install watch` if you want it.
 
-Expected on a fresh session: `unknown`, then a prompt of yours makes it `working`, and the end of the
+Expected on a fresh session: `idle` (grey), then a prompt of yours makes it `working`, and the end of the
 turn makes it `waiting`. `reason` tells you which event wrote each line. If the state never changes,
 the plugin is not mounted (`reason` will be stuck at `init` from a stale file, or the file will not
 exist) — check `~/Library/Logs/DSH Desktop/harness.log` for a loader warning.

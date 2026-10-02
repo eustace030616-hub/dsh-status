@@ -74,11 +74,11 @@ const main = makeCtx()
 // A long heartbeat isolates the state-machine assertions from re-stamping.
 apply(main.ctx, { statePath, heartbeatMs: 60000 })
 
-await check('init: publishes unknown, creates the directory, writes a full document', () => {
+await check('init: publishes idle, creates the directory, writes a full document', () => {
   assert.ok(existsSync(statePath), 'state file was not created')
   const doc = read()
   assert.equal(doc.version, 1)
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'init')
   assert.equal(doc.sessionId, null)
   assert.equal(doc.title, null)
@@ -91,10 +91,10 @@ await check('writer: is atomic — no temporary file survives a write', () => {
   assert.deepEqual(readdirSync(join(root, 'nested')), ['state.json'])
 })
 
-await check('agent/created (root): records the session, stays unknown', async () => {
+await check('agent/created (root): records the session, stays idle', async () => {
   await fire(main, 'agent/created', { agent: ROOT })
   const doc = read()
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'session-start')
   assert.equal(doc.sessionId, 'session-root')
   assert.deepEqual(doc.meta, { cwd: '/tmp/project' })
@@ -164,7 +164,7 @@ await check('heartbeat: re-stamps the timestamp without changing the state', asy
   const first = readBeat()
   await sleep(600)
   const second = readBeat()
-  assert.equal(second.state, 'unknown')
+  assert.equal(second.state, 'idle')
   assert.ok(second.updatedAt > first.updatedAt, 'the heartbeat did not advance updatedAt')
 })
 
@@ -185,7 +185,7 @@ await check('a mid-turn mount latches the session from turn-stopping alone', asy
 await check('dispose: clears the timer and publishes a final unknown', () => {
   for (const dispose of main.disposers) dispose()
   const doc = read()
-  assert.equal(doc.state, 'unknown')
+  assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'dispose')
   assert.equal(doc.sessionId, null)
 })
