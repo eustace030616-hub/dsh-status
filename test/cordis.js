@@ -1,5 +1,5 @@
 /**
- * Stage 1 integration test — **real cordis**, real filesystem.
+ * Integration test — **real cordis**, real filesystem.
  *
  * `test/run.js` proves the state machine is coherent, but it drives it through
  * a hand-written stub context. This file mounts the plugin into the actual
@@ -66,7 +66,7 @@ async function check(label, fn) {
   }
 }
 
-console.log('dsh-status — stage 1 under real cordis\n')
+console.log('dsh-status — under real cordis\n')
 
 const ctx = new Context()
 const fork = ctx.plugin(plugin, { statePath, heartbeatMs: 60000 })
@@ -153,7 +153,7 @@ await check('an approval through the real waterfall still gets the real answer',
     () => gate.then(() => 'unavailable')
   )
   await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.equal(read().state, 'asking', 'the observer did not turn the light blue')
+  assert.equal(read().state, 'asking', 'the observer did not put the light on the blocked state')
   release()
   assert.equal(await pending, 'unavailable', 'the observer swallowed the real answer')
   assert.equal(read().state, 'working', 'the ask must restore the state it interrupted')

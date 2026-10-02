@@ -1,5 +1,5 @@
 /**
- * Stage 1 self-test: no DSH, no test framework, no dependencies.
+ * State-machine self-test: no DSH, no test framework, no dependencies.
  *
  * A fake cordis context hands us the listeners `apply` registers, so the whole
  * state machine is exercised against a real file on disk in a temp directory.
@@ -80,7 +80,7 @@ function fire(harness, event, payload) {
 const statePath = join(root, 'nested', 'state.json')
 const read = () => JSON.parse(readFileSync(statePath, 'utf8'))
 
-console.log('dsh-status — stage 1\n')
+console.log('dsh-status — the state machine\n')
 
 await check('the shipped renderer was built from the Swift source beside it', () => {
   const source = readFileSync(new URL('../mac/Sources/DSHLight.swift', import.meta.url))
@@ -188,7 +188,7 @@ await check('a second prompt flips back to working', async () => {
   assert.equal(read().state, 'working')
 })
 
-await check('a permission request turns the light blue, and answering returns it to work', async () => {
+await check('a permission request blocks the light, and answering returns it to work', async () => {
   let release
   const gate = new Promise((resolve) => { release = resolve })
   const handler = main.handlers.get('approval/request')
@@ -202,7 +202,7 @@ await check('a permission request turns the light blue, and answering returns it
   assert.equal(read().state, 'working')
 })
 
-await check('a question uses the same blue, and two open asks stay blue until both answer', async () => {
+await check('a question blocks it too, and two open asks stay blocked until both answer', async () => {
   let releaseA, releaseB
   const gateA = new Promise((resolve) => { releaseA = resolve })
   const gateB = new Promise((resolve) => { releaseB = resolve })

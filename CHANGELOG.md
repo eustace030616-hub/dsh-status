@@ -15,6 +15,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-10-02
+
+### Changed
+
+- **A pass over the project to remove what had stopped being true.** No behaviour changed: the same
+  document, the same light, the same menu.
+- Removed, as code nothing could reach any more: the **style migration** (`Look.migrated` and the legacy
+  `DSHLight.style` key), dead since the styles were removed and already cleared on every install that had
+  one; **`granted`/`toppedUp` in the renderer**, which no row has drawn since the account was flattened to
+  one line per currency (the publisher still sends them, because `meta` is additive-only); `Reading.publishedAt`
+  and `ValueRow.show(_:)`, each written and never read; and the duplicated doc comment on `lensRects()`.
+- Descriptions corrected where they had drifted from the code: `stage 1` / `stage 2` / `stage 3` in the
+  README, `package.json`, the test headers and the build script's Touch Bar note; "one dot" in the renderer
+  and in `Info.plist`, where the object is a three-lens traffic light; a renderer mapping table claiming a
+  blocked session turns a lens **blue**, when it breathes the yellow one — blue exists only as `--print`'s
+  character; two README paragraphs that each announced the red/grey split as if it were the first; test
+  counts that said 29/13/11 against 33/14/13; and a README sentence promising the built binary would ship
+  "at stage 3", which is now simply what happens. `scripts/install.sh` also expected a state called
+  `unknown`, which no version of this publisher has ever written.
+
 ## [0.7.7] - 2026-10-02
 
 ### Changed

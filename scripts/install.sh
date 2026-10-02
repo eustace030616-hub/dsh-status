@@ -32,7 +32,7 @@ die() {
 row() {
   cat <<YAML
 
-# dsh-status — publishes this session's turn state for a native indicator.
+# dsh-status — publishes this session's turn state for the native traffic light.
 # Remove this block, or run scripts/install.sh --uninstall, to unmount.
 - insert:
     - id: $ROW_ID
@@ -90,6 +90,6 @@ mounted '$ROW_ID'
 Next:
   1. restart DSH Desktop — the profile patch layer is applied at boot
   2. watch the state file in another terminal:
-       watch -n1 cat "\$HOME/Library/Application Support/dsh-status/state.json"
-  3. send a prompt and expect: unknown -> working -> waiting
+       python3 -c 'import json,time;print(json.load(open("$HOME/Library/Application Support/dsh-status/state.json"))["state"])'
+  3. send a prompt and expect: idle -> working -> waiting
 EOF

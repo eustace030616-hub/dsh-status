@@ -1,9 +1,11 @@
 /**
- * DSHLight — stage 2 of the DSH status light.
+ * DSHLight — the renderer for the dsh-status light.
  *
- * Reads the state document published by the dsh-status plugin and draws one
- * dot: red for unknown or stale, yellow while the agent works, green when the
- * turn is over and it is the user's move. Clicking brings DSH forward.
+ * Reads the state document published by the dsh-status plugin and draws a
+ * traffic light: red for a feed that cannot be trusted, yellow while a session
+ * works or is blocked on you, green for a finish you have not read, and dark
+ * when there is nothing to say. A double-click switches between DSH and the
+ * application you came from; a right-click opens the list.
  *
  * Two modes, one state machine:
  *   DSHLight --print [--state-file PATH]   follow the light in a terminal
@@ -17,7 +19,7 @@ import Darwin
 
 // MARK: - The contract
 
-/// What the dot can show.
+/// What the light can show.
 ///
 /// Three of these are states the publisher reports; `broken` is not — it is the
 /// renderer saying *the feed itself* cannot be trusted (no file, unreadable,
@@ -66,8 +68,6 @@ struct SessionSummary {
 struct AccountFigures {
     var currency: String
     var total: String
-    var granted: String?
-    var toppedUp: String?
 }
 
 /// The account block, when the publisher sends one.
@@ -93,9 +93,6 @@ struct Reading {
     var sessionId: String?
     /// Seconds since the publisher last wrote. `nil` when there is no file.
     var age: Double?
-    /// When that write happened. Only useful for staleness — the heartbeat
-    /// moves it every couple of seconds.
-    var publishedAt: Date?
     /// When this state was last *asserted*. This, not `updatedAt`, is what an
     /// acknowledgement may be compared against: it survives the heartbeat.
     var changedAt: Date?
@@ -205,7 +202,6 @@ enum StateFile {
             detail: reason,
             sessionId: sessionId,
             age: age,
-            publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000),
             changedAt: changedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) },
             sessions: sessions,
             account: account
@@ -230,12 +226,7 @@ enum StateFile {
             guard let currency = text(item, "currency"), let total = text(item, "total") else {
                 return nil
             }
-            return AccountFigures(
-                currency: currency,
-                total: total,
-                granted: text(item, "granted"),
-                toppedUp: text(item, "toppedUp")
-            )
+            return AccountFigures(currency: currency, total: total)
         }
         return Account(
             fetchedAt: (reported["fetchedAt"] as? NSNumber)
@@ -651,31 +642,10 @@ struct Look {
     static let litRange: ClosedRange<Double> = 0.20...1.00
 
     /// What a fresh install wears, and the fallback for a remembered value that
-    /// is missing or unreadable.
-    ///
-    /// These are the numbers the light was dialled to by hand, picked up from the
-    /// preferences of the light they were chosen on — a new install should look
-    /// like the approved light, not like a different object. The body's opacity
-    /// is the one that has no slider: see `bodyOpacity`.
+    /// is missing or unreadable: the numbers the light was dialled to by hand.
+    /// The body's opacity and the corner radius have no slider — see
+    /// `bodyOpacity`.
     static let standard = Look(lens: 20, gap: 8, restAlpha: 0.28, litAlpha: 0.85)
-
-    /// The two styles this build used to have, read once and translated into
-    /// slider values: whoever was on the 22-point flat light keeps a 22-point
-    /// light and dials it from there.
-    static func migrated(fromStyle style: String?) -> Look {
-        var look = standard
-        switch style {
-        case "classic":
-            look.lens = 22
-            look.gap = 8
-        case "nostalgic":
-            look.lens = 31
-            look.gap = 10
-        default:
-            break
-        }
-        return look
-    }
 
     /// The housing is proportional rather than a setting: a fixed inset looks
     /// like a collar around a small lens and like a hairline around a large one.
@@ -694,9 +664,8 @@ struct Look {
     }
 
     /// The body's corner radius, taken from the **narrow** side so a tall light
-    /// gets a rounded square rather than a lozenge. It used to be taken from the
-    /// height, which was the narrow side back when the light could lie down: at
-    /// 32 points wide, a radius of 14 leaves four points of straight edge.
+    /// gets a rounded square rather than a lozenge: at 32 points wide, a radius
+    /// of 14 leaves four points of straight edge.
     var cornerRadius: CGFloat {
         min(14, min(size.width, size.height) * 0.32)
     }
@@ -799,7 +768,7 @@ final class TrafficLightView: NSView {
     /// Read on mouse-down, where AppKit sets it reliably. Two clicks on purpose:
     /// one stray click must not move the user.
     private var clicksAtMouseDown = 1
-    /// When the first of the two clicks landed, so the dot can show it arrived.
+    /// When the first of the two clicks landed, so the light can show it arrived.
     private var pendingUntil: Date?
 
     /// The ring around a lens: how light it is, and how solid. The opacity is not
@@ -865,7 +834,6 @@ final class TrafficLightView: NSView {
         }
     }
 
-    /// Lenses in fixed order, laid out along the current axis.
     /// Lenses in fixed order, stacked from the top: red, then yellow, then
     /// green, which is the order a traffic light has used for a century.
     private func lensRects() -> [(Lens, NSRect)] {
@@ -1027,8 +995,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let originKey = "DSHLight.windowOrigin"
     private static let lookKey = "DSHLight.look"
-    /// Where a style used to be remembered, read once to seed the look above.
-    private static let legacyStyleKey = "DSHLight.style"
     /// Where the docked side is remembered. Named for a border because it used
     /// to hold four of them; a stale "top" or "bottom" simply fails to parse and
     /// the side is decided from where the light is, as it always was.
@@ -1323,9 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(folded("Appearance", appearanceMenu()))
         menu.addItem(folded("Account", accountMenu()))
 
-        // Reserved: the next folded group goes here.
         menu.addItem(.separator())
-
         menu.addItem(choice("Quit the light", on: false, action: #selector(quit), tag: 0))
         return menu
     }
@@ -1365,15 +1329,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// An account list. The figures come from the publisher's `meta.account`,
     /// which is the only place they can come from: this process holds no key and
-    /// makes no requests, so a balance it cannot read is a dash and a reason
-    /// rather than a number it guessed.
+    /// makes no requests, so a balance it cannot read is a dim row naming the
+    /// reason rather than a number it guessed.
     ///
-    /// One folded group per currency the account actually holds something in —
-    /// the endpoint answers in every currency the account has ever touched, and a
-    /// currency sitting at zero is a row that says nothing. Then the way out when
-    /// nothing is left, and a footer saying how old the answer is, because
-    /// hours-old figures should not read like current ones. Nothing here can
-    /// change a bulb.
+    /// One line per currency the account actually holds something in — the
+    /// endpoint answers in every currency the account has ever touched, and a
+    /// currency sitting at zero is a line that says nothing. Then the way to add
+    /// to it, and a footer saying how old the answer is, because hours-old
+    /// figures should not read like current ones. Nothing here can change a bulb.
     private func accountMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -1494,16 +1457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// back to the standard: a half-written or older set of values can never
     /// produce a light this build cannot draw.
     private func loadLook(defaults: UserDefaults) -> Look {
-        guard let saved = defaults.dictionary(forKey: Self.lookKey) else {
-            // First run after the styles were removed: keep the size whoever was
-            // using had chosen, write it down as slider values, and forget the
-            // style itself — a migration that is not stored would be run again
-            // next launch, and the launch after that would have nothing to read.
-            let migrated = Look.migrated(fromStyle: defaults.string(forKey: Self.legacyStyleKey))
-            defaults.removeObject(forKey: Self.legacyStyleKey)
-            store(migrated, in: defaults)
-            return migrated
-        }
+        guard let saved = defaults.dictionary(forKey: Self.lookKey) else { return .standard }
         func number(_ key: String) -> Double? { (saved[key] as? NSNumber)?.doubleValue }
         func clamped(_ value: Double?, _ range: ClosedRange<Double>) -> Double? {
             value.map { min(max($0, range.lowerBound), range.upperBound) }
@@ -1620,8 +1574,7 @@ final class SliderRow: NSView {
 ///
 /// Deliberately the same geometry as `SliderRow` — same left inset, same right
 /// edge for the value — so a list of figures and a list of sliders line up when
-/// they are next to each other. The value is set through `show(_:)`, which is
-/// where a real number will arrive when there is one.
+/// they are next to each other.
 final class ValueRow: NSView {
     static let width: CGFloat = SliderRow.width
 
@@ -1651,12 +1604,6 @@ final class ValueRow: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("not built from a nib")
-    }
-
-    /// The figure for this row. Nothing calls it yet: there is no account to
-    /// ask, and the dashes are the point.
-    func show(_ value: String) {
-        figure.stringValue = value
     }
 }
 

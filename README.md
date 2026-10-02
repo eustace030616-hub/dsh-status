@@ -1,10 +1,8 @@
 # dsh-status
 
 **A traffic light for DeepSeek Harness.** A DSH plugin publishes the session's current state to one
-small JSON file; a native macOS dot reads it and shows red / yellow / green above every window.
-
-The file is the entire interface between the two halves, which is what let each be built and tested
-while the other did not exist.
+small JSON file; a native macOS traffic light reads it and shows red / yellow / green above every window.
+The file is the entire interface between the two halves.
 
 - **The publisher.** `lib/` — a DSH plugin, installed from the plugin page.
 - **The renderer.** `mac/` — `DSHLight.app`, universal and ad-hoc signed.
@@ -37,45 +35,35 @@ while the other did not exist.
 | `updatedAt` | ms epoch. **When the publisher was last heard from.** Re-stamped every `heartbeatMs` even when nothing changes — that is what makes staleness work, and why it must never be read as a change time. |
 | `changedAt` | ms epoch. **When this state was last asserted.** Written on a publish and left alone by the heartbeat, so this — not `updatedAt` — is what an acknowledgement may be compared against. |
 | `heartbeatMs` | The publisher's cadence, so the renderer need not hardcode a staleness rule. |
-| `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `dispose`. Debugging only. |
+| `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `approval`, `question`, `answered`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
 | `meta.sessions` | Every session the publisher is watching: `{ id, state, reason, changedAt }`. The headline `state` above is the most urgent of them, for readers that understand only one. |
-| `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. Never carries a credential. |
+| `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. The renderer draws `total`; the breakdown rides along for a reader that wants it. Never carries a credential. |
 
 **Renderer mapping**
 
-| State | Lenses |
+| The light | When |
 |---|---|
-| rest (`idle`) | all three dark |
-| a session is working | yellow lit |
-| a session is blocked on you (`asking`) | **yellow breathing** — alive, not an alarm |
-| an unread finish (`waiting`) | green lit |
-| the feed cannot be trusted | red lit |
+| all three lenses dark | rest (`idle`): nothing is pending |
+| yellow, steady | a session is working |
+| yellow, breathing | a session is blocked on you (`asking`) — alive, not an alarm |
+| green | a finish you have not read (`waiting`) |
+| red | the feed itself cannot be trusted |
 
-A broken feed outranks everything, because nothing else can be said about it. The split between red and
-dark is the important one: **red means the feed itself cannot be trusted**, while dark means the feed is
-healthy and nothing is pending. A reader that meets a state it has never heard of rests rather than
-alarms, so adding one later cannot make an older renderer cry wolf.
-**With several sessions** the publisher reports each one in `meta.sessions` and the renderer
-aggregates, because only the renderer knows what you have already read:
+Red is reserved for the feed — the file is gone, unreadable or stale, so nothing can be said about the
+session. Dark means the feed is healthy and says nothing is pending. A reader that meets a state it has
+never heard of rests rather than alarms, so adding one later cannot make an older renderer cry wolf.
+`--print` labels the same states with one character each — ⚪ 🟡 🟢 🔵 🔴 — and reads `asking` as 🔵 where the
+window breathes the yellow lens.
 
-| Condition | Light |
-|---|---|
-| any session `asking` | 🔵 blue — a blocked agent cannot proceed, so it outranks everything |
-| any session `waiting` that you have not read | 🟢 green — *even while other sessions work*, so a finish is never swallowed by unrelated work |
-| any session `working` | 🟡 yellow |
-| otherwise | ⚪ grey |
+**With several sessions** the publisher reports each one in `meta.sessions` and the renderer aggregates,
+because only the renderer knows what you have already read: a blocked session outranks a finish, a finish
+outranks work, and a finish you have read is no longer a finish. So with one session finished and another
+still working you see green; once you have been back to DSH and read the finish it turns **yellow, not
+dark**, because the other session is still busy. Each session carries its own `changedAt`, so reading one
+finish cannot swallow a later one.
 
-So with one session finished and another still working you see green; once you have been back to DSH
-and read the finish it turns **yellow, not grey**, because the other session is still busy. Each
-session carries its own `changedAt`, so reading one finish cannot swallow a later one.
-
-The split between red and grey is the important one. **Red means the feed itself cannot be trusted**
-— the file is gone, unreadable or stale, so nothing can be said about the session. **Grey means the
-feed is healthy and says nothing is pending.** A reader that meets a state it has never heard of
-degrades to grey, never to red: adding a state later must not make older renderers cry wolf.
-
-**Extension rule (how future features land without breaking stage 2).** New information — latest
+**Extension rule (how new information lands without breaking a reader).** New information — latest
 prompt cost, token counts, model name, a prompt preview for hover — goes into `meta`. New top-level
 keys are only ever *added*. Nothing is renamed or removed. `version` changes only if a reader
 written against the old shape would be wrong. `meta.cwd` is already there as the first tenant.
@@ -87,11 +75,11 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 
 | Transition | Trigger | Why |
 |---|---|---|
-| → `idle` | plugin load, a session coming up or being switched to, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching sessions is how a user acknowledges a green: the reminder has done its job. |
+| → `idle` | plugin load, a session coming up, and dispose | Rest. Nothing is pending, which is not a failure — and a disposed publisher must not keep claiming a session. Switching between live sessions emits no event at all, so the acknowledgement it counts as happens on the Mac, not here. |
 | → `working` | `agent/pre-step` with a non-empty `messages` | The only verified signal that a prompt was actually accepted. The empty case is the ordinary between-steps pass and is ignored. |
 | → `waiting` | `agent/turn-stopping` | The turn is about to close and is waiting on the user. |
-| → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light stays blue until the last one is answered. |
-| *(ignored)* | any of the above on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. |
+| → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light keeps breathing until the last one is answered. |
+| *(ignored)* | a turn event on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. An ask is the exception: it is charged to the parent session, because the human is still the one who answers. |
 
 Two further safety properties:
 
@@ -102,7 +90,7 @@ Two further safety properties:
 
 ## Configuration
 
-Both keys are optional and validated by hand; any unusable value silently falls back to the default
+Every key is optional and validated by hand; any unusable value silently falls back to the default
 (see `lib/config.js`).
 
 | Key | Default | Notes |
@@ -171,10 +159,10 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 > dependencies, and a resolution failure inside a plugin can stop every profile from booting — that
 > is exactly the incident the desktop-pet bridge hit in its PR #104.
 
-## Stage 2 — the renderer
+## The renderer
 
 `mac/` builds **DSHLight.app**: a three-lens traffic light. Three states used to compete for one bulb,
-and grey had to carry "rest"; with three lenses there is a place for everything.
+and rest had to be painted as one of them; with three lenses there is a place for everything.
 
 The plugin starts this for you when it mounts and stops it on dispose, so there is nothing to launch
 by hand. Build it only when working on it, and after changing the Swift run `npm run ship` to refresh
@@ -199,7 +187,7 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--state-file PATH` | which document to read (default: the published path) |
 | `--print` | follow in the terminal instead of drawing a window |
 | `--interval SECONDS` | poll interval, default `0.25` |
-| `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
+| `--open PATH` | what the double-click opens, default `/Applications/DSH Desktop.app` |
 | `--ack-app BUNDLE-ID` | another application whose return to the front settles a green; repeatable |
 | `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
@@ -208,31 +196,27 @@ To follow the light in a terminal instead — printed once, then only when it ch
 The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
 and dark appearance on its own. The body is **half the material's own strength** (`bodyOpacity`, 0.5) with a
-**wash of black at 0.15 over it** (`bodyShade`), because the material is a light grey in light appearance and
-read as too bright against a bright wallpaper. Darkening it rather than thinning it further is deliberate: a
-fainter body dissolves into whatever is behind it, a darker one keeps its shape in both appearances. Neither
-is a slider, and neither is the corner radius — the three parts of the look that are fixed rather than dialled.
+**wash of black at 0.15 over it** (`bodyShade`): the material is a light grey in light appearance, and read
+as too bright against a bright wallpaper. Darkened rather than thinned further, because a fainter body
+dissolves into whatever is behind it where a darker one keeps its shape. Neither is a slider, and neither is
+the corner radius — the three parts of the look that are fixed rather than dialled.
 
 The body and the light are **siblings, not parent and child**. They were nested until the body needed to be
 fainter than opaque, and a view's alpha applies to everything inside it: the lenses would have faded along
 with the square behind them. The body's corner radius is taken from its **narrow** side, so a tall light is
-a rounded square — the radius used to come from the height, which was the narrow side back when the light
-could lie down.
+a rounded square.
 
 The light is a **traffic light**: three lenses stacked, red at the top. It has one shape, and it **docks to
 whichever side of the screen is nearer** when dropped — left or right, remembered — sliding up and down
 that side until it is dropped again. There is no horizontal mode: a row of lenses along the top edge was a
-shape that had to be re-fitted every time the menu bar moved, which is one problem that only existed
-because the shape did. The right-click list opens flush to the docked side, hanging inward, so an
-edge-docked light never opens a list off the edge of the screen.
+shape that had to be re-fitted every time the menu bar moved. The right-click list opens flush to the docked
+side, hanging inward, so an edge-docked light never opens a list off the edge of the screen.
 
 **The menu bar's height is held back, simply and always.** With "automatically hide and show the menu bar"
 on, `visibleFrame` reports the whole screen whether the bar is up or down — 1680×1050 against a 1680×1050
 frame here — so `NSStatusBar.thickness` is reserved instead, and a vertical light on a side edge is clamped
-so its top can never reach the bar's strip. It is worth being plain about why it is reserved rather than
-followed: measuring the bar's own window and moving the light with it was tried, and it produced a laggy
-light that overlapped the bar it was following. A side-docked light has no business in the top strip, so
-the strip is held back and the light is never underneath it.
+so its top can never reach the bar's strip. Following the bar's own window was tried and produced a laggy
+light that overlapped the bar it was following; a side-docked light has no business in the top strip anyway.
 
 ```
 Appearance ▸
@@ -249,19 +233,17 @@ Appearance ▸                    Account ▸
   Reset to default
 ```
 
-**The list is a list of lists.** Almost everything worth putting in it is a thing with several numbers
-inside — the light's own appearance, an account balance — so each of those is a folded group and the first
-level stays down to what the light can say at a glance. Everything is folded by default, and the values
-inside are whatever the light is wearing now.
+**The first level of the list is folded, and short.** A folded group is where a set of numbers lives — the
+light's own appearance, the account — so the first level stays down to those two and the way out. Everything
+is folded by default, and the values inside are whatever the light is wearing now.
 
 **The light is four numbers, and the appearance group is where they are set.** One slider each for the
 size of a lens, the gap between the lenses, and how solid a resting and a lit lens are, and a `Reset to
-default` row beneath them — four sliders with no way back is a one-way door, and the values a fresh install
-wears are not something anyone should have to remember. The reset is one assignment through the same path a
-slider takes, so the window is re-fitted and the change is remembered exactly as a drag would be. Every slider
-applies **as it is dragged** — the window is re-fitted and re-anchored on each step, so the light on screen
-is the preview rather than a change that lands when the list closes. The values are remembered between
-runs, and `--size` overrides the size slider for a single run.
+default` row beneath them: four sliders with no way back is a one-way door. The reset is one assignment
+through the same path a slider takes, so the window is re-fitted and the change is remembered exactly as a
+drag would be. Every slider applies **as it is dragged** — the window is re-fitted and re-anchored on each
+step, so the light on screen is the preview rather than a change that lands when the list closes. The values
+are remembered between runs, and `--size` overrides the size slider for a single run.
 
 A slider is a real control in a menu row, not a label: the row is a small view holding a hand-drawn knob,
 because the one event a menu is documented to push into a view it hosts is the mouse, while a stock
@@ -282,22 +264,10 @@ old the answer is. A balance is one number: folding it behind its own currency n
 deeper than the question, and the granted/topped-up breakdown belongs to a page rather than to a light. The
 endpoint answers in every currency the account has ever touched, so a currency sitting at zero is a line that
 says nothing and is not drawn; a figure that cannot be read is *not* treated as zero, because an unreadable
-amount should be shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination DSH's account
-service publishes for the same purpose, not a URL invented here — and it is offered whether or not the balance
-could be read. The renderer
-holds no key and makes no requests, which is why a balance it cannot read is a dim reason rather than a
-number it guessed:
-
-```
-Account ▸
-  CNY ▸
-    Total      12.76
-    Granted     0.00
-    Topped up  12.76
-  ─────────────
-  Top up now
-  updated 3m ago
-```
+amount should be shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination
+DSH's account service publishes for the same purpose, not a URL invented here — and it is offered whether or
+not the balance could be read. The renderer holds no key and makes no requests, which is why a balance it
+cannot read is a dim reason rather than a number it guessed.
 
 A failure is a **code, not a message** — `no-key`, `unauthorized`, `offline`, `timeout`, `http-503`,
 `bad-body` — shown as a sentence in that footer, and logged once per change of reason rather than once per
@@ -319,13 +289,13 @@ grey (`rimGrey`, 0.45) rather than black, at an opacity left exactly where the b
 rendered lens over white, the ring reads 0.805 where a black one would read 0.550, against a resting disc at
 0.918.
 
-Three properties worth keeping:
+Properties worth keeping:
 
 - **It only ever reads.** Nothing in the renderer writes to the state file, so it cannot disturb the
   publisher or the session.
 - **A dead feed is red, not the last colour.** The heartbeat is what makes that possible — without
   it, a killed DSH would leave a green light claiming the agent had finished.
-- **Rest is grey, not red.** Red is reserved for a feed that cannot be trusted, so it stays rare and
+- **Rest is dark, not red.** Red is reserved for a feed that cannot be trusted, so it stays rare and
   keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
   has not learned yet are all rest, and the reminder green is what stands out because nothing else
   competes with it.
@@ -359,14 +329,12 @@ Three properties worth keeping:
   modes, and compared against the finish's `changedAt` — a newer finish is green again rather than
   being suppressed by an older acknowledgement. Against `updatedAt` it would expire on the next
   heartbeat, which is exactly the bug this field exists to fix. A publisher too old to send
-  `changedAt` is handled by the renderer noticing the finish itself. If you drive DSH in a browser rather than the desktop
-  app, add its bundle identifier: `--ack-app com.apple.Safari`, knowing that any return to Safari
-  then counts as a return to DSH.
+  `changedAt` is handled by the renderer noticing the finish itself.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
   package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
 
 > **Point it at whatever actually shows your DSH.** If you drive DSH in a browser rather than the
-> desktop app, the click and the return-to-DSH acknowledgement both need to know that:
+> desktop app, the double-click and the return-to-DSH acknowledgement both need to know that:
 >
 > ```bash
 > open build/DSHLight.app --args --open /Applications/Safari.app --ack-app com.apple.Safari
@@ -375,10 +343,7 @@ Three properties worth keeping:
 > Otherwise the light sends you to the desktop app while you are working in a tab, and never notices
 > you coming back. `--ack-app` is repeatable if you use more than one.
 
-`mac/` is deliberately **not** in the package's `files`: at stage 3 the plugin will spawn the built
-binary, and that is the moment the binary has to ship with the package.
-
-## Verify stage 1
+## Verify
 
 ```bash
 cat "$HOME/Library/Application Support/dsh-status/state.json"
@@ -398,9 +363,7 @@ while true; do
 done
 ```
 
-> `watch` is a Linux tool and is not shipped with macOS — `brew install watch` if you want it.
-
-Expected on a fresh session: `idle` (grey), then a prompt of yours makes it `working`, and the end of the
+Expected on a fresh session: `idle` (dark), then a prompt of yours makes it `working`, and the end of the
 turn makes it `waiting`. `reason` tells you which event wrote each line. If the state never changes,
 the plugin is not mounted (`reason` will be stuck at `init` from a stale file, or the file will not
 exist) — check `~/Library/Logs/DSH Desktop/harness.log` for a loader warning.
@@ -411,15 +374,15 @@ exist) — check `~/Library/Logs/DSH Desktop/harness.log` for a loader warning.
 npm test        # or: node test/run.js && node test/balance.js && node test/cordis.js
 ```
 
-Two layers, deliberately separated because they prove different things:
+Three files, deliberately separated because they prove different things:
 
 | File | What it proves | What it cannot |
 |---|---|---|
-| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, that an unwritable path warns once, and the account block: published, carried through a heartbeat, refused without moving the light, and off when switched off. 29 checks. | Nothing about cordis — it drives a purpose-built stub context. |
-| `test/balance.js` | The balance fetcher against every answer the endpoint can give: figures, a refused key, a server error, a dead connection, a timeout, and a body that cannot be read. It also asserts the key never appears in what comes back. 13 checks, no network and no key. | Nothing about the plugin around it — the `fetch` is handed in. |
-| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, and a bad state path cannot break the mount. 11 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
+| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, that an unwritable path warns once, and the account block: published, carried through a heartbeat, refused without moving the light, and off when switched off. 33 checks. | Nothing about cordis — it drives a purpose-built stub context. |
+| `test/balance.js` | The balance fetcher against every answer the endpoint can give: figures, a refused key, a server error, a dead connection, a timeout, and a body that cannot be read. It also asserts the key never appears in what comes back. 14 checks, no network and no key. | Nothing about the plugin around it — the `fetch` is handed in. |
+| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, a bad state path cannot break the mount, and the account reaches the real credential service. 13 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
 
-Both run against real files in a temp directory. Neither needs DSH, a network, or an API key.
+All three run against real files in a temp directory. None needs DSH, a network, or an API key.
 
 ## Secrets
 
@@ -465,5 +428,3 @@ command arguments or output. If one does escape, say so plainly and rotate it th
   Fill it in when the renderer needs it.
 - `agent/status` appears in the harness docs as a UI-driving event, but no emitter for it exists in
   any shipped bundle. Do not build on it until proven.
-- One root agent is assumed. `agent/created` overwrites the recorded session, so a second concurrent
-  root agent would make the light follow whichever spoke last.

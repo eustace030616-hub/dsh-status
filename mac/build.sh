@@ -56,8 +56,8 @@ slices=("$OUT/slices/DSHLight-arm64")
 if build_slice x86_64 2>"$OUT/slices/x86_64.log"; then
   slices+=("$OUT/slices/DSHLight-x86_64")
 else
-  # An Intel slice is a courtesy, not a requirement: this is a Mac-only helper
-  # for a Mac-only host, and every Touch Bar machine is Intel or arm64.
+  # An Intel slice is a courtesy, not a requirement: this is a helper for a
+  # Mac-only host, and it runs on whatever Mac the harness runs on.
   echo "note: the x86_64 slice did not build; producing arm64 only"
   sed 's/^/      /' "$OUT/slices/x86_64.log" | tail -5
 fi
