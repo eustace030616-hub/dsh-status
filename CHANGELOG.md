@@ -36,6 +36,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `LightOrientation`, the top and bottom docking borders, the corner zone that existed only to stop a change
   of shape from resizing the light, and the two menu-bar functions with their 60 Hz follow loop.
 
+### Fixed
+
+- **`mac/Resources/Info.plist` had been emptied** while bumping the version, which left the bundle without
+  its identifier, its display name or `LSUIElement`. A bundle like that cannot be launched as an application:
+  macOS runs the executable bare, in a defaults domain of its own, so the light came up in its default size
+  and forgot the look and position it had been given. Restored from the previous commit and versioned
+  properly — by reading the file before writing it, which is what the one-liner had got wrong.
+
 ## [0.6.1] - 2026-10-02
 
 ### Changed
