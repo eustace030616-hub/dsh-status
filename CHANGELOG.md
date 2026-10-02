@@ -64,8 +64,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   blue until the last one is answered. Deliberately not root-filtered — a subagent's approval still
   needs the human — which is the one place the root filter does not apply.
 - **A click toggles between the answer and the work.** Green, blue and red bring DSH forward, because
-  something finished, is blocked, or is broken. Grey and yellow return the user to the application
-  they were in before DSH. It restores the application rather than the window or tab — as far as
+  something finished, is blocked, or is broken. Grey and yellow toggle both ways: back to the
+  application the user came from when DSH is in front, and forward to DSH when it is not — a way in as
+  well as a way out. With nowhere to return to it says so instead of doing nothing. It restores the application rather than the window or tab — as far as
   public API reaches — and remembers neither DSH nor the light itself, since returning to either
   would be a no-op. Found while testing: the light *does* briefly become frontmost when it launches,
   which was enough for it to remember itself and make the return click do nothing.

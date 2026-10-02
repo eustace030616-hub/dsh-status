@@ -231,6 +231,14 @@ final class Acknowledgement {
         return true
     }
 
+    /// Whether the user is looking at DSH right now.
+    var isLookingAtTarget: Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
+        }
+        return targets.contains(front)
+    }
+
     /// Put the user back in the application they were in before DSH.
     @discardableResult
     func returnToLastOther() -> Bool {
@@ -420,9 +428,17 @@ func runPrintMode(_ options: Options) {
         acknowledgement?.poll()
         // What a click would do right now, so the rule is visible without
         // clicking — and so this can be checked without a mouse.
-        if let other = acknowledgement?.lastOther?.bundleId, other != announcedReturn {
-            announcedReturn = other
-            print("  [a click on rest or working would return to \(other)]")
+        let from = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nowhere"
+        let to: String
+        if acknowledgement?.isLookingAtTarget == true {
+            to = acknowledgement?.lastOther?.bundleId ?? "nowhere (no other app seen yet)"
+        } else {
+            to = acknowledgement.map { _ in "dsh" } ?? "dsh (acknowledgement off)"
+        }
+        let clickLine = "[click on rest/working: \(from) -> \(to)]"
+        if clickLine != announcedReturn {
+            announcedReturn = clickLine
+            print("  \(clickLine)")
         }
         let raw = StateFile.read(at: options.statePath)
         let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
@@ -564,8 +580,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.bringHarnessForward()
             case .idle, .working:
                 // Rest, or working: nothing here needs the user, so the click
-                // returns them to whatever they were doing instead.
-                self.acknowledgement?.returnToLastOther()
+                // moves them between DSH and the application they came from —
+                // whichever way they are pointing at that moment. One control
+                // for both directions, rather than only a way out.
+                if self.acknowledgement?.isLookingAtTarget == true {
+                    self.acknowledgement?.returnToLastOther()
+                } else {
+                    self.bringHarnessForward()
+                }
             }
         }
         view.onMove = { origin in

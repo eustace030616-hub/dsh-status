@@ -188,8 +188,9 @@ Three properties worth keeping:
   competes with it.
 - **A click means "take me to what needs me", then "put me back".** Green (finished), blue (blocked on
   an answer) and red (no signal) bring DSH forward, because something needs you. Grey (rest) and yellow
-  (working) return you to the application you were in before DSH, so the light is a toggle between the
-  answer and the work. It restores the *application*, which is as far as public API reaches — macOS
+  (working) **toggle**: if DSH is in front they put you back in the application you came from, and if
+  it is not they bring DSH forward — one control for both directions, so the light is a way in as well
+  as a way out. When there is nowhere to return to it says so rather than silently doing nothing. It restores the *application*, which is as far as public API reaches — macOS
   will not let one application select another's window or browser tab — but that is what "back to my
   work" means: VSCode returns to the window being edited, the browser to the tab being read. Neither
   DSH nor the light itself is ever remembered, since returning to either would be a no-op.
@@ -205,6 +206,16 @@ Three properties worth keeping:
   then counts as a return to DSH.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
   package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
+
+> **Point it at whatever actually shows your DSH.** If you drive DSH in a browser rather than the
+> desktop app, the click and the return-to-DSH acknowledgement both need to know that:
+>
+> ```bash
+> open build/DSHLight.app --args --open /Applications/Safari.app --ack-app com.apple.Safari
+> ```
+>
+> Otherwise the light sends you to the desktop app while you are working in a tab, and never notices
+> you coming back. `--ack-app` is repeatable if you use more than one.
 
 `mac/` is deliberately **not** in the package's `files`: at stage 3 the plugin will spawn the built
 binary, and that is the moment the binary has to ship with the package.
