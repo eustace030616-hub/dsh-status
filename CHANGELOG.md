@@ -15,6 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-02
+
+### Changed
+
+- **The docked border decides the orientation.** A light on a side edge stacks its lenses; on a top or
+  bottom edge it lays them in a row, so it always grows *along* the border rather than across it and the
+  docking reads as deliberate. The orientation group left the right-click list and `--orientation` went
+  with it: a setting that could contradict where the light actually is had no business existing.
+- **The click acknowledgement is a rounded square, not a ring.** At this size a circle read as part of
+  the light rather than as feedback about the click.
+
+
 ## [0.5.0] - 2026-10-02
 
 ### Changed

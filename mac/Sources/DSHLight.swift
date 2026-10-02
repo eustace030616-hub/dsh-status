@@ -397,9 +397,8 @@ struct Options {
     var interval = 0.25
     /// Bundle identifiers whose return to the front acknowledges a finish.
     var ackTargets: Set<String> = []
-    /// Appearance overrides; nil means "use whatever was chosen last".
+    /// Appearance override; nil means "use whatever was chosen last".
     var style: LightStyle?
-    var orientation: LightOrientation?
     /// Set by --no-ack: green is kept until the publisher says otherwise.
     var ackDisabled = false
 
@@ -411,18 +410,22 @@ struct Options {
           change. Ctrl-C to stop.
 
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
-               [--level LEVEL] [--size POINTS]
+               [--style classic|nostalgic] [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
-          apps. DOUBLE-CLICK it to switch between DSH and the application you
-          came from, whatever colour is showing; drag it to reposition. A single
-          click does nothing on purpose.
+          apps. It docks to the nearest screen border when you drop it, and the
+          border decides the shape: lenses stack on a side edge and lie in a row
+          on a top or bottom one.
+          DOUBLE-CLICK switches between DSH and the application you came from,
+          whatever is lit. RIGHT-CLICK opens the list. Dragging docks it
+          elsewhere, and a single click does nothing on purpose.
           LEVEL is floating, status or screensaver (default screensaver).
 
-          A green finish rests as soon as you come back to DSH — either by
-          switching to it or by clicking the light — because the reminder has
-          been served. --ack-app adds another application whose return counts;
-          repeat it for several. The default is the application named by
-          --open. --no-ack keeps green until the next prompt instead.
+          A finish rests as soon as DSH is in front: you are looking at it, so
+          the reminder has done its job. A session blocked on you breathes the
+          yellow lens rather than blinking. --ack-app adds another application
+          whose return counts; repeat it for several. The default is the
+          application named by --open. --no-ack keeps green until the next
+          prompt instead.
 
       DSHLight --help
     """
@@ -449,8 +452,6 @@ struct Options {
                 if let raw = value(), let points = Double(raw), points > 4 { options.diameter = CGFloat(points) }
             case "--style":
                 options.style = value() == "nostalgic" ? .nostalgic : .classic
-            case "--orientation":
-                options.orientation = value() == "vertical" ? .vertical : .horizontal
             case "--ack-app":
                 if let identifier = value() { options.ackTargets.insert(identifier) }
             case "--no-ack":
@@ -612,6 +613,16 @@ struct LightGeometry {
 /// flush to the same one.
 enum ScreenBorder: String {
     case left, right, top, bottom
+
+    /// A light on a side edge stacks its lenses; on a top or bottom edge it lays
+    /// them in a row. It then grows *along* the border it is docked to rather
+    /// than across it, which is what makes the docking look deliberate.
+    var orientation: LightOrientation {
+        switch self {
+        case .left, .right: return .vertical
+        case .top, .bottom: return .horizontal
+        }
+    }
 }
 
 /// One lens of the three, in the order a traffic light and an Apple window
@@ -753,10 +764,14 @@ final class TrafficLightView: NSView {
         }
 
         if let until = pendingUntil, Date() < until {
-            NSColor.white.withAlphaComponent(0.95).setStroke()
-            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 2.5, dy: 2.5))
-            ring.lineWidth = 2
-            ring.stroke()
+            // A rounded square, not a ring: at this size a circle reads as part
+            // of the light, and the acknowledgement should not look like one.
+            let box = bounds.insetBy(dx: 1.5, dy: 1.5)
+            let radius = min(12, box.height * 0.28)
+            let path = NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius)
+            NSColor.white.withAlphaComponent(0.9).setStroke()
+            path.lineWidth = 2
+            path.stroke()
         }
     }
 
@@ -844,7 +859,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private let finishes = FinishTracker()
     private var style: LightStyle = .classic
-    private var orientation: LightOrientation = .horizontal
     private var border: ScreenBorder = .right
     /// How far the light sits from the border it is docked to.
     private static let dockInset: CGFloat = 10
@@ -854,7 +868,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let originKey = "DSHLight.windowOrigin"
     private static let styleKey = "DSHLight.style"
-    private static let orientationKey = "DSHLight.orientation"
     private static let borderKey = "DSHLight.border"
 
     init(options: Options) {
@@ -866,12 +879,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         style = options.style
             ?? LightStyle(rawValue: defaults.string(forKey: Self.styleKey) ?? "")
             ?? .classic
-        orientation = options.orientation
-            ?? LightOrientation(rawValue: defaults.string(forKey: Self.orientationKey) ?? "")
-            ?? .horizontal
         border = ScreenBorder(rawValue: defaults.string(forKey: Self.borderKey) ?? "") ?? .right
 
-        let size = LightGeometry.of(style).size(orientation)
+        let size = LightGeometry.of(style).size(border.orientation)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
@@ -890,7 +900,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
         view.style = style
-        view.orientation = orientation
+        view.orientation = border.orientation
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
@@ -947,26 +957,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dock() {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let frame = window.frame
+        border = nearestBorder(for: window.frame, in: visible)
+        let want = LightGeometry.of(style).size(border.orientation)
+
+        // Grow inward from the border it is heading to, so a change of shape
+        // never throws the light across the screen.
+        var frame = window.frame
+        if frame.size != want {
+            switch border {
+            case .right: frame.origin.x = frame.maxX - want.width
+            case .left: frame.origin.x = frame.minX
+            case .top: frame.origin.y = frame.maxY - want.height
+            case .bottom: frame.origin.y = frame.minY
+            }
+            frame.size = want
+            window.setFrame(frame, display: true)
+        }
+
+        var origin = window.frame.origin
+        switch border {
+        case .left: origin.x = visible.minX + Self.dockInset
+        case .right: origin.x = visible.maxX - want.width - Self.dockInset
+        case .top: origin.y = visible.maxY - want.height - Self.dockInset
+        case .bottom: origin.y = visible.minY + Self.dockInset
+        }
+        window.setFrameOrigin(origin)
+
+        view?.style = style
+        view?.orientation = border.orientation
+
+        UserDefaults.standard.set(border.rawValue, forKey: Self.borderKey)
+        UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
+    }
+
+    /// The nearest border of the screen the light is on.
+    private func nearestBorder(for frame: NSRect, in visible: NSRect) -> ScreenBorder {
         let candidates: [(ScreenBorder, CGFloat)] = [
             (.left, abs(frame.minX - visible.minX)),
             (.right, abs(visible.maxX - frame.maxX)),
             (.top, abs(visible.maxY - frame.maxY)),
             (.bottom, abs(frame.minY - visible.minY))
         ]
-        border = candidates.min { $0.1 < $1.1 }?.0 ?? .right
-
-        var origin = frame.origin
-        switch border {
-        case .left: origin.x = visible.minX + Self.dockInset
-        case .right: origin.x = visible.maxX - frame.width - Self.dockInset
-        case .top: origin.y = visible.maxY - frame.height - Self.dockInset
-        case .bottom: origin.y = visible.minY + Self.dockInset
-        }
-        window.setFrameOrigin(origin)
-
-        UserDefaults.standard.set(border.rawValue, forKey: Self.borderKey)
-        UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
+        return candidates.min { $0.1 < $1.1 }?.0 ?? .right
     }
 
     /// Restore the last position, clamped onto a screen that still exists — a
@@ -1023,19 +1055,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
-        menu.addItem(.separator())
-        menu.addItem(header("Orientation"))
-        for orientation in LightOrientation.allCases {
-            let item = choice(
-                orientation.title,
-                on: orientation == self.orientation,
-                action: #selector(chooseOrientation(_:)),
-                tag: 0
-            )
-            item.representedObject = orientation
-            menu.addItem(item)
-        }
-
         // Reserved: the next feature goes here, between separators.
         menu.addItem(.separator())
         menu.addItem(.separator())
@@ -1062,39 +1081,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let style = sender.representedObject as? LightStyle else { return }
         self.style = style
         UserDefaults.standard.set(style.rawValue, forKey: Self.styleKey)
-        refit()
-    }
-
-    @objc private func chooseOrientation(_ sender: NSMenuItem) {
-        guard let orientation = sender.representedObject as? LightOrientation else { return }
-        self.orientation = orientation
-        UserDefaults.standard.set(orientation.rawValue, forKey: Self.orientationKey)
-        refit()
+        // dock() re-fits the window and re-decides the orientation, so the light
+        // grows inward from the border it is already on.
+        dock()
     }
 
     @objc private func quit() {
         NSApp.terminate(nil)
     }
 
-    /// Re-fit the window after a style or orientation change, keeping the corner
-    /// furthest from the docked border, so the light grows inward rather than
-    /// jumping across the screen.
-    private func refit() {
-        guard let window, let view else { return }
-        let size = LightGeometry.of(style).size(orientation)
-        let old = window.frame
-        var origin = old.origin
-        switch border {
-        case .right: origin.x = old.maxX - size.width
-        case .left: origin.x = old.minX
-        case .top: origin.y = old.maxY - size.height
-        case .bottom: origin.y = old.minY
-        }
-        view.style = style
-        view.orientation = orientation
-        window.setFrame(NSRect(origin: origin, size: size), display: true)
-        dock()
-    }
 }
 
 /// What the singleton lock came to.

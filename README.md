@@ -198,29 +198,29 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--interval SECONDS` | poll interval, default `0.25` |
 | `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
 | `--style classic\|nostalgic` | appearance, overriding what was chosen last |
-| `--orientation horizontal\|vertical` | layout, overriding what was chosen last |
 | `--ack-app BUNDLE-ID` | another application whose return to the front settles a green; repeatable |
 | `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
 | `--size POINTS` | dot diameter, default `24` |
 
-The light **docks to whichever screen border is nearest** when dropped, and remembers which one. The
-right-click list opens flush to that same border, hanging inward, so an edge-docked light never opens a
-menu off the edge of the screen.
+The light **docks to whichever screen border is nearest** when dropped, and remembers which one. That
+border also decides the shape: lenses stack on a side edge and lie in a row along a top or bottom one, so
+the light always grows *along* the border rather than across it. The right-click list opens flush to the
+same border, hanging inward, so an edge-docked light never opens a menu off the edge of the screen.
 
 ```
-Style                          Orientation
-  ✓ Classic                      ✓ Horizontal
-    Nostalgic                      Vertical
+Style
+  ✓ Classic
+    Nostalgic
 ─────────────
    (reserved for the next thing)
 ─────────────
 Quit the light
 ```
 
-Style and orientation are independent axes — every combination works — and both persist between runs,
-with `--style` and `--orientation` overriding them at launch. The separated group is where the next
-feature goes, and a single menu column gives every row the same width for free.
+The style persists between runs, with `--style` overriding it at launch. Orientation is not a setting at
+all: it follows the border the light is docked to, so the two can never disagree. The separated group is
+where the next feature goes, and a single menu column gives every row the same width for free.
 
 Three properties worth keeping:
 
