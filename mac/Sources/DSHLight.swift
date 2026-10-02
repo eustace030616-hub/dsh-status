@@ -1384,7 +1384,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let held = account.figures.filter { !isZero($0.total) }
         for figures in held {
-            menu.addItem(folded(figures.currency, currencyMenu(figures)))
+            // The figure on its own line, titled by its currency. A balance is
+            // one number: folding it behind its own name put the answer a click
+            // deeper than the question, and the breakdown it unfolded into —
+            // granted, topped up — is a page's business rather than a light's.
+            let item = NSMenuItem()
+            item.view = ValueRow(label: figures.currency, value: figures.total)
+            item.isEnabled = true
+            menu.addItem(item)
         }
         if held.isEmpty, !account.figures.isEmpty {
             menu.addItem(note("every balance is zero"))
@@ -1430,24 +1437,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         return amount == 0
-    }
-
-    private func currencyMenu(_ figures: AccountFigures) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let rows: [(String, String?)] = [
-            ("Total", figures.total),
-            ("Granted", figures.granted),
-            ("Topped up", figures.toppedUp)
-        ]
-        for (label, value) in rows {
-            guard let value else { continue }
-            let item = NSMenuItem()
-            item.view = ValueRow(label: label, value: value)
-            item.isEnabled = true
-            menu.addItem(item)
-        }
-        return menu
     }
 
     /// A row that is only information: dim, and not clickable.

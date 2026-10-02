@@ -241,13 +241,12 @@ Account    ▸
 Quit the light
 
 Appearance ▸                    Account ▸
-  Size   ●━━━━━━━━━━  20 pt       CNY ▸
-  Gap    ●━━━━━━━━━━   8 pt         Total      12.62
-  Rest   ●━━━━━━━━━━  28%           Granted     0.00
-  Lit    ●━━━━━━━━━━  85%           Topped up  12.62
-  ─────────────                   ─────────────
-  Reset to default                Top up now
-                                  updated 2m ago
+  Size   ●━━━━━━━━━━  20 pt       CNY          12.62
+  Gap    ●━━━━━━━━━━   8 pt       ─────────────
+  Rest   ●━━━━━━━━━━  28%         Top up now
+  Lit    ●━━━━━━━━━━  85%         updated 2m ago
+  ─────────────
+  Reset to default
 ```
 
 **The list is a list of lists.** Almost everything worth putting in it is a thing with several numbers
@@ -277,11 +276,13 @@ the light wait with it, which is the one outcome this project cannot accept.
 
 **The account group is real, and filling it is the plugin's work rather than the renderer's.** The
 publisher makes one authenticated `GET https://api.deepseek.com/user/balance` every `balanceMs` and puts the
-answer in `meta.account`; the renderer draws whatever it finds there — one folded group per currency that
-actually holds something, with `Top up now` and a footer saying how old the answer is. The endpoint answers in
-every currency the account has ever touched, so a currency sitting at zero is a row that says nothing and is
-not listed; a figure that cannot be read is *not* treated as zero, because an unreadable amount should be
-shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination DSH's account
+answer in `meta.account`; the renderer draws whatever it finds there — **one line per currency that actually
+holds something**, titled by the currency with the figure beside it, then `Top up now` and a footer saying how
+old the answer is. A balance is one number: folding it behind its own currency name put the answer a click
+deeper than the question, and the granted/topped-up breakdown belongs to a page rather than to a light. The
+endpoint answers in every currency the account has ever touched, so a currency sitting at zero is a line that
+says nothing and is not drawn; a figure that cannot be read is *not* treated as zero, because an unreadable
+amount should be shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination DSH's account
 service publishes for the same purpose, not a URL invented here — and it is offered whether or not the balance
 could be read. The renderer
 holds no key and makes no requests, which is why a balance it cannot read is a dim reason rather than a

@@ -15,6 +15,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-10-02
+
+### Changed
+
+- **The balance is printed on its own line, titled by its currency, instead of folded behind it.** The
+  `Account` group showed `CNY ▸` which unfolded into total, granted and topped up; a balance is one number,
+  and that arrangement put the answer a click deeper than the question. The breakdown belongs to a page rather
+  than to a light. A currency that holds something is now one line — `CNY    12.62` — with the same right-hand
+  column as the slider readouts, and the folded group is gone.
+
 ## [0.7.6] - 2026-10-02
 
 ### Added
