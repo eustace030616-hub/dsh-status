@@ -14,7 +14,14 @@
  */
 import assert from 'node:assert/strict'
 
-import { API_KEY_REF, BALANCE_URL, fetchBalance, normalizeBalance } from '../lib/balance.js'
+import {
+  API_KEY_REF,
+  BALANCE_URL,
+  MIN_RETRY_MS,
+  fetchBalance,
+  nextDelay,
+  normalizeBalance
+} from '../lib/balance.js'
 
 /** Key-shaped on purpose: a canary that could not be mistaken for one would
  *  prove nothing. */
@@ -212,6 +219,21 @@ await check('a runtime without fetch is a reason, not a crash', async () => {
 await check('the reference name is the contract, not a value', () => {
   assert.equal(API_KEY_REF, 'DEEPSEEK_API_KEY')
   assert.match(API_KEY_REF, /^[A-Za-z_][A-Za-z0-9_]*$/)
+})
+
+await check('the retry backs off from seconds to the period, and resets on success', () => {
+  const period = 300_000
+  // A success goes straight back to the healthy cadence.
+  assert.equal(nextDelay({ previous: 0, ok: true, period }), period)
+  assert.equal(nextDelay({ previous: MIN_RETRY_MS, ok: true, period }), period)
+  // A failure waits seconds, not a whole period: one blank five minutes was the
+  // symptom that prompted this.
+  assert.equal(nextDelay({ previous: 0, ok: false, period }), MIN_RETRY_MS)
+  assert.equal(nextDelay({ previous: MIN_RETRY_MS, ok: false, period }), 30_000)
+  assert.equal(nextDelay({ previous: 30_000, ok: false, period }), 60_000)
+  // And it stops doubling at the period rather than running away.
+  assert.equal(nextDelay({ previous: 240_000, ok: false, period }), period)
+  assert.equal(nextDelay({ previous: period, ok: false, period }), period)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

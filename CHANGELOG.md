@@ -15,6 +15,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-02
+
+### Fixed
+
+- **The account is a child plugin now, and asks for the credential service the one way that works: `inject`.**
+  0.7.1 called `ctx.get("credentials")`, which cordis documents as reading a service "without the inject
+  requirement" and which does work in a flat context — but not from the harness's forked plugin realm, where
+  it answers `undefined`. Every shipped consumer of the seam declares it (`dsh-client-connection`,
+  `dsh-authorization`, `dsh-deepseek-account-platform`, `dsh-webhook-github`); the two that use `ctx.get`
+  treat it as optional. Hence an hour of `no-key` against a store that had the key.
+- **And it is a *child* plugin because of what an unsatisfied `inject` does**: the plugin waits, quietly, and
+  is never applied. Declaring the dependency on the publisher itself would have made the *light* wait for a
+  service a custom composition may not mount. Now a composition with no credential service loses the balance
+  and keeps everything else — verified against the real cordis with the real credentials provider, and with
+  no provider at all.
+
+### Changed
+
+- **A failed lookup is retried in fifteen seconds and backs off to `balanceMs`,** instead of waiting a whole
+  period: one transient miss used to look like five blank minutes. The delay is a pure function with its own
+  checks, and it resets on success.
+- **Figures survive a later failure.** They are still the last thing that was true, so the block keeps them
+  with their real `fetchedAt` and adds the reason — the list shows both, rather than replacing a balance with
+  an apology.
+- **The request's timeout is `AbortSignal.timeout`** rather than a timer of our own: one fewer handle to leak
+  or to unref, and a `TimeoutError` is mapped to the same `timeout` code as an abort.
+- The stub context in `test/run.js` now **emulates injection** — a service reaches a child plugin only
+  through `inject`, and a child whose dependencies are missing is never applied. A stub that hands the
+  service to everyone is how the last two versions passed their tests while the harness failed.
+
 ## [0.7.1] - 2026-10-02
 
 ### Fixed

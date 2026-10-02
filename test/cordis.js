@@ -20,7 +20,7 @@
  * Run with `node test/cordis.js`.
  */
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -176,6 +176,90 @@ await check('an unwritable state path cannot break the mount', async () => {
   await doomedFork
   await doomedFork.dispose()
 })
+
+// MARK: the account
+
+/**
+ * Key-shaped on purpose: a canary that could not be mistaken for a key would
+ * prove nothing. It is written into a throwaway credentials document, so no real
+ * secret is anywhere near this test.
+ */
+const CANARY = 'sk-canary0000000000000000000000000000'
+
+const BALANCE_BODY = {
+  is_available: true,
+  balance_infos: [
+    { currency: 'CNY', total_balance: '14.58', granted_balance: '0.00', topped_up_balance: '14.58' },
+    { currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }
+  ]
+}
+
+const PROVIDER_ENTRY = join(APP_MODULES, '@deepseek-ai/dsh-credentials-local/lib/index.js')
+
+await check('a composition with no credential service leaves the account unclaimed', async () => {
+  // The failure mode this is guarding: an `inject` the composition cannot
+  // satisfy must cost the balance and not the light. If the publisher itself had
+  // declared the dependency, nothing would have been published at all.
+  const bare = new Context()
+  const barePath = join(root, 'bare', 'state.json')
+  const bareFork = bare.plugin(plugin, { statePath: barePath, heartbeatMs: 60000 })
+  await bareFork
+  const doc = JSON.parse(readFileSync(barePath, 'utf8'))
+  assert.equal(doc.state, 'idle', 'the light mounts anyway')
+  assert.equal(doc.meta.account, undefined, 'and the account never applies')
+  await bareFork.dispose()
+})
+
+if (!existsSync(PROVIDER_ENTRY)) {
+  console.log('  skip the credential-service check: no dsh-credentials-local here\n')
+} else {
+  await check('the account resolves the key through the real credential service', async () => {
+    // The whole chain, with the real provider and the real cordis: a service
+    // reaches a plugin only through `inject`, which is what two earlier versions
+    // of this got wrong while their stubbed tests stayed green.
+    const credentialsPath = join(root, 'credentials.yaml')
+    writeFileSync(credentialsPath, `version: 1\nrefs:\n  DEEPSEEK_API_KEY: ${CANARY}\n`)
+    chmodSync(credentialsPath, 0o600)
+
+    const { default: credentialsLocal } = await import(pathToFileURL(PROVIDER_ENTRY).href)
+    const composed = new Context()
+    // Held and disposed: the provider keeps a handle open (it watches the
+    // document so a rotated key is noticed), and a test that leaves it running
+    // never lets the process exit.
+    const provider = composed.plugin(credentialsLocal, { path: credentialsPath })
+
+    const realFetch = globalThis.fetch
+    const calls = []
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url, options })
+      return { status: 200, ok: true, json: async () => BALANCE_BODY }
+    }
+
+    const accountPath = join(root, 'account', 'state.json')
+    let fork
+    try {
+      fork = composed.plugin(plugin, { statePath: accountPath, heartbeatMs: 60000 })
+      await fork
+      // The child waits for the service, then fetches: give both a moment.
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      const raw = readFileSync(accountPath, 'utf8')
+      const doc = JSON.parse(raw)
+      assert.equal(calls.length, 1, 'exactly one authenticated request')
+      assert.equal(calls[0].url, 'https://api.deepseek.com/user/balance')
+      assert.equal(calls[0].options.headers.authorization, `Bearer ${CANARY}`)
+      assert.equal(doc.meta.account.balances[0].currency, 'CNY')
+      assert.equal(doc.meta.account.balances[0].total, '14.58')
+      assert.equal(doc.meta.account.isAvailable, true)
+      assert.ok(!raw.includes(CANARY), 'the document never carries the key')
+      assert.equal(doc.state, 'idle', 'and the light was never disturbed')
+    } finally {
+      globalThis.fetch = realFetch
+      await fork?.dispose()
+      await provider?.dispose()
+    }
+  })
+}
 
 rmSync(root, { recursive: true, force: true })
 

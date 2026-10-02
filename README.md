@@ -262,6 +262,11 @@ because the one event a menu is documented to push into a view it hosts is the m
 percents, so it can always reach the number the readout prints. While the list is open the light drops a
 level, below the menu, so a lens growing under a row cannot take the clicks meant for it.
 
+**The account is a plugin of its own, and that is the point of it.** It declares `inject: ['credentials']`,
+and an unsatisfied `inject` leaves a plugin waiting rather than failing — so a composition with no credential
+service loses the balance and keeps the light. Declaring the same dependency on the publisher would have made
+the light wait with it, which is the one outcome this project cannot accept.
+
 **The account group is real, and filling it is the plugin's work rather than the renderer's.** The
 publisher makes one authenticated `GET https://api.deepseek.com/user/balance` every `balanceMs` and puts the
 answer in `meta.account`; the renderer draws whatever it finds there — one folded group per currency,
@@ -281,7 +286,10 @@ Account ▸
 
 A failure is a **code, not a message** — `no-key`, `unauthorized`, `offline`, `timeout`, `http-503`,
 `bad-body` — shown as a sentence in that footer, and logged once per change of reason rather than once per
-attempt. DeepSeek's own 401 quotes part of the key it rejected, so a response body is read only when the
+attempt. A failure is retried in fifteen seconds and doubles from there up to `balanceMs`, because a single
+transient miss used to cost a whole blank period. Figures already published are **kept** when a later lookup
+fails: they are still the last thing that was true, so the list shows them with their real age and the reason
+they have stopped moving. DeepSeek's own 401 quotes part of the key it rejected, so a response body is read only when the
 answer was a good one and dropped otherwise; see [Secrets](#secrets).
 
 An account lookup **never touches `state`**. Red stays reserved for a feed that cannot be trusted, so an
@@ -398,11 +406,11 @@ Both run against real files in a temp directory. Neither needs DSH, a network, o
 
 This project never handles the API key. The plugin knows the **name** `DEEPSEEK_API_KEY` and nothing else:
 
-- **The value is resolved at request time**, through the harness's credential seam —
-  `await ctx.get('credentials').resolve('DEEPSEEK_API_KEY')` — and lives in one local for the length of one
-  request. Nothing stores it, and a rotated key reaches the next request with no restart. `ctx.get` and not
-  `ctx.credentials`: property access reaches only services a plugin has *declared*, and this one declares
-  none, on purpose (see below).
+- **The value is resolved at request time** through the harness's credential seam and lives in one local for
+  the length of one request. Nothing stores it, and a rotated key reaches the next request with no restart.
+  The seam arrives by **`inject`**, which is the only route that works: plain property access reaches only
+  services a plugin has declared, and `ctx.get` answers `undefined` outside the realm that provides one. Two
+  versions of this package learned that the hard way, in that order.
 - **Existence is asked with `describe()`**, which reports `{configured, source}` and by design never
   returns the value. Any surface that only needs to know *whether* a key is set uses that one.
 - **The published document is plain JSON on disk.** Numbers go in it; the key never does. The renderer is

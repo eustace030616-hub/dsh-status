@@ -17,14 +17,34 @@ import { apply } from '../lib/index.js'
 const root = mkdtempSync(join(tmpdir(), 'dsh-status-test-'))
 const warnings = []
 
-/** A fake cordis context that records listeners and disposers. */
-function makeCtx() {
+/**
+ * A fake cordis context that records listeners and disposers.
+ *
+ * It emulates injection, because that is the part that broke in the real
+ * harness: a service reaches a child plugin only through `inject`, a child whose
+ * dependencies are missing is never applied, and the service appears on the
+ * child's context and not on the parent's. A stub that handed the service to
+ * everyone would keep passing while the harness failed.
+ *
+ * @param {object} [services] - services this composition provides, by name.
+ */
+function makeCtx(services = {}) {
   const handlers = new Map()
   const disposers = []
   const ctx = {
     logger: { warn: (message) => warnings.push(String(message)) },
     on: (event, handler) => handlers.set(event, handler),
-    effect: (callback) => disposers.push(callback())
+    effect: (callback) => disposers.push(callback()),
+    plugin: (mod, config = {}) => {
+      const apply = typeof mod === 'function' ? mod : mod?.apply
+      const needs = (typeof mod === 'function' ? mod.inject : mod?.inject) ?? []
+      const missing = needs.filter((name) => services[name] === undefined)
+      if (missing.length === 0 && typeof apply === 'function') {
+        const child = { ...ctx, ...Object.fromEntries(needs.map((name) => [name, services[name]])) }
+        apply(child, config)
+      }
+      return { dispose() {} }
+    }
   }
   return { ctx, handlers, disposers }
 }
@@ -314,6 +334,14 @@ await check('an unwritable path warns exactly once and never throws', () => {
  */
 const CANARY = 'sk-canary0000000000000000000000000000'
 
+/** The clock as it was before any harness captured it. */
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+
+/** A wait the harness's stubbed clock cannot swallow: this timer was taken
+ *  before the stub existed. */
+const sleepReal = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
+
 /** The endpoint's answer, as it arrives on this machine. */
 const BALANCE_BODY = {
   is_available: true,
@@ -343,40 +371,34 @@ function mountWithBalance({ response, balance = true, credentials = true, ambien
   const timers = []
 
   const realFetch = globalThis.fetch
-  const realSetInterval = globalThis.setInterval
-  const realClearInterval = globalThis.clearInterval
   const realAmbient = process.env.DEEPSEEK_API_KEY
+  const scheduled = []
 
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
     return typeof response === 'function' ? response(url, options) : response
   }
-  globalThis.setInterval = (fn, ms) => {
+  // The account's cadence is captured rather than waited on: a cadence under
+  // test control is one that cannot make the suite slow, and one that can be
+  // stepped through to prove what it does after a failure.
+  globalThis.setTimeout = (fn, ms) => {
     const handle = { fn, ms, unref() {} }
-    timers.push(handle)
+    scheduled.push(handle)
     return handle
   }
-  globalThis.clearInterval = () => {}
+  globalThis.clearTimeout = () => {}
   if (ambient === null) delete process.env.DEEPSEEK_API_KEY
   else process.env.DEEPSEEK_API_KEY = ambient
 
-  const harness = makeCtx()
   const seam = {
     resolve: async (ref) => {
       refs.push(ref)
+      if (credentials === 'throwing') throw new Error('seam unavailable')
+      if (credentials === 'empty') return undefined
       return ref === 'DEEPSEEK_API_KEY' ? { value: CANARY, source: 'store' } : undefined
     }
   }
-  // `ctx.get` is how cordis reaches a service without the inject requirement,
-  // and it is the path the harness actually takes. `'property'` covers the other
-  // shape so a context that hands the service over directly keeps working.
-  if (credentials === true) harness.ctx.get = (name) => (name === 'credentials' ? seam : undefined)
-  else if (credentials === 'property') harness.ctx.credentials = seam
-  else if (credentials === 'throwing') {
-    harness.ctx.get = () => {
-      throw new Error('no such service')
-    }
-  }
+  const harness = makeCtx(credentials === false ? {} : { credentials: seam })
 
   apply(harness.ctx, { statePath: path, heartbeatMs: 250, launch: false, balance, balanceMs: 60000 })
 
@@ -384,15 +406,17 @@ function mountWithBalance({ response, balance = true, credentials = true, ambien
     path,
     calls,
     refs,
-    timers,
+    scheduled,
     text: () => readFileSync(path, 'utf8'),
     read: () => JSON.parse(readFileSync(path, 'utf8')),
-    /** The account's timer, callable on demand so a cadence can be a test. */
-    balanceTimer: () => timers.find((timer) => timer.ms === 60000),
+    /** The account's next scheduled attempt, in milliseconds. */
+    nextDelay: () => scheduled.at(-1)?.ms,
+    /** Run that attempt now. */
+    tick: () => scheduled.at(-1)?.fn(),
     restore: () => {
       globalThis.fetch = realFetch
-      globalThis.setInterval = realSetInterval
-      globalThis.clearInterval = realClearInterval
+      globalThis.setTimeout = realSetTimeout
+      globalThis.clearTimeout = realClearTimeout
       if (realAmbient === undefined) delete process.env.DEEPSEEK_API_KEY
       else process.env.DEEPSEEK_API_KEY = realAmbient
       rmSync(dir, { recursive: true, force: true })
@@ -403,7 +427,7 @@ function mountWithBalance({ response, balance = true, credentials = true, ambien
 await check('balance: the figures are published, and the key is nowhere', async () => {
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
   try {
-    await sleep(25) // the first lookup is deliberately not awaited
+    await sleepReal(25) // the first lookup is deliberately not awaited
     const doc = mounted.read()
 
     assert.equal(mounted.refs[0], 'DEEPSEEK_API_KEY', 'the seam is asked for a reference')
@@ -434,7 +458,7 @@ await check('balance: a refused key is a reason, not a red light', async () => {
   const refusal = { error: { message: 'Authentication Fails, Your api key: ****nary is invalid' } }
   const mounted = mountWithBalance({ response: answerFor(401, refusal) })
   try {
-    await sleep(25)
+    await sleepReal(25)
     const doc = mounted.read()
 
     assert.equal(doc.meta.account.reason, 'unauthorized')
@@ -446,9 +470,10 @@ await check('balance: a refused key is a reason, not a red light', async () => {
     assert.equal(warnings.filter((line) => line.includes('balance')).length, 1)
 
     // Twice more, and still once: a wrong key is wrong until it is fixed.
-    mounted.balanceTimer().fn()
-    mounted.balanceTimer().fn()
-    await sleep(25)
+    mounted.tick()
+    await sleepReal(25)
+    mounted.tick()
+    await sleepReal(25)
     assert.equal(warnings.filter((line) => line.includes('balance')).length, 1)
   } finally {
     mounted.restore()
@@ -458,13 +483,11 @@ await check('balance: a refused key is a reason, not a red light', async () => {
 await check('balance: the snapshot survives a heartbeat', async () => {
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
   try {
-    await sleep(25)
+    await sleepReal(25)
     const first = mounted.read()
-    // The heartbeat timer is stubbed like every other one, so fire it by hand
-    // rather than waiting: a cadence under test control is a cadence that cannot
-    // make the suite slow or flaky. A millisecond first, so the stamp moves.
-    await sleep(5)
-    mounted.timers.find((timer) => timer.ms === 250).fn()
+    // Only the account's clock is captured; the heartbeat is a real interval at
+    // 250ms, so a real wait is the honest way to see one.
+    await sleepReal(300)
     const later = mounted.read()
 
     assert.ok(later.updatedAt > first.updatedAt, 'the heartbeat re-stamped the document')
@@ -478,71 +501,60 @@ await check('balance: the snapshot survives a heartbeat', async () => {
 await check('balance: switched off means no request and no block', async () => {
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY), balance: false })
   try {
-    await sleep(25)
+    await sleepReal(25)
     assert.equal(mounted.calls.length, 0)
     assert.equal(mounted.read().meta.account, undefined)
-    assert.equal(mounted.timers.length, 1, 'only the heartbeat timer exists')
+    assert.equal(mounted.scheduled.length, 0, 'nothing was scheduled either')
   } finally {
     mounted.restore()
   }
 })
 
-await check('balance: the ambient variable is the fallback with no seam', async () => {
+await check('balance: the ambient variable is the fallback when the store is empty', async () => {
+  // The environment matters only where the seam is present but holds nothing:
+  // with no service at all the child never wakes, which is the check above.
   const mounted = mountWithBalance({
     response: answerFor(200, BALANCE_BODY),
-    credentials: false,
+    credentials: 'empty',
     ambient: CANARY
   })
   try {
-    await sleep(25)
+    await sleepReal(25)
     assert.equal(mounted.calls.length, 1, 'the lookup still happened')
     assert.equal(mounted.calls[0].options.headers.authorization, `Bearer ${CANARY}`)
-    assert.ok(!mounted.text().includes(CANARY))
+    assert.ok(!mounted.text().includes(CANARY), 'and the key is still not in the document')
   } finally {
     mounted.restore()
   }
 })
 
-await check('balance: the service is read without the inject requirement', async () => {
-  // cordis answers `undefined` from `ctx.get` when the composition mounts no
-  // such service, which is what lets this plugin ask for one without declaring a
-  // dependency it would then wait for — and a plugin that waits never mounts.
-  // The first version asked `ctx.credentials`, which reaches only *injected*
-  // services, and reported "no api key configured" against a store that had one.
+await check('balance: the account is a child plugin, so the seam arrives by inject', async () => {
+  // Not `ctx.get` and not a property on the publisher: in this harness a service
+  // reaches a plugin only through its own `inject`. Two earlier versions asked
+  // for it the other two ways and reported "no api key configured" against a
+  // store that had one — the stub context emulates injection precisely so that
+  // mistake cannot pass here again.
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
   try {
-    await sleep(25)
-    assert.equal(mounted.refs[0], 'DEEPSEEK_API_KEY')
+    await sleepReal(25)
+    assert.equal(mounted.refs[0], 'DEEPSEEK_API_KEY', 'the seam was asked for the reference')
     assert.equal(mounted.calls.length, 1)
+    assert.equal(mounted.calls[0].options.headers.authorization, `Bearer ${CANARY}`)
     assert.equal(mounted.read().meta.account.balances[0].total, '14.58')
   } finally {
     mounted.restore()
   }
 })
 
-await check('balance: a service handed over directly also works', async () => {
-  const mounted = mountWithBalance({
-    response: answerFor(200, BALANCE_BODY),
-    credentials: 'property'
-  })
-  try {
-    await sleep(25)
-    assert.equal(mounted.calls.length, 1)
-    assert.equal(mounted.read().meta.account.balances[0].total, '14.58')
-  } finally {
-    mounted.restore()
-  }
-})
-
-await check('balance: a lookup that throws is a reason, not a crash', async () => {
+await check('balance: a seam that refuses to answer falls back to no key', async () => {
   const mounted = mountWithBalance({
     response: answerFor(200, BALANCE_BODY),
     credentials: 'throwing'
   })
   try {
-    await sleep(25)
-    assert.equal(mounted.calls.length, 0, 'nothing was reachable to ask')
+    await sleepReal(25)
     const doc = mounted.read()
+    assert.equal(mounted.calls.length, 0, 'nothing was reachable to ask')
     assert.equal(doc.meta.account.reason, 'no-key')
     assert.equal(doc.state, 'idle', 'and the light is untouched')
   } finally {
@@ -550,12 +562,64 @@ await check('balance: a lookup that throws is a reason, not a crash', async () =
   }
 })
 
-await check('balance: a composition with no credential service is a reason, not a failure', async () => {
+await check('balance: a failure is retried in seconds, and success returns to the period', async () => {
+  // The first attempt runs at once. A failure must not wait a whole period: one
+  // transient miss used to mean five blank minutes from the outside.
+  let answer = answerFor(401, { error: { message: 'nope' } })
+  const mounted = mountWithBalance({ response: () => answer })
+  try {
+    await sleepReal(25)
+    assert.equal(mounted.nextDelay(), 15000, 'the first retry is the floor, not the period')
+
+    // Step the cadence: another failure doubles it, and it caps at the period.
+    mounted.tick()
+    await sleepReal(25)
+    assert.equal(mounted.nextDelay(), 30000)
+
+    // A good answer puts it back on the healthy cadence.
+    answer = answerFor(200, BALANCE_BODY)
+    mounted.tick()
+    await sleepReal(25)
+    assert.equal(mounted.nextDelay(), 60000)
+    assert.equal(mounted.read().meta.account.balances[0].total, '14.58')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: figures survive a later failure, and the reason explains them', async () => {
+  let answer = answerFor(200, BALANCE_BODY)
+  const mounted = mountWithBalance({ response: () => answer })
+  try {
+    await sleepReal(25)
+    const good = mounted.read().meta.account
+    answer = answerFor(503, {})
+    mounted.tick()
+    await sleepReal(25)
+    const later = mounted.read().meta.account
+
+    assert.equal(later.reason, 'http-503')
+    assert.deepEqual(later.balances, good.balances, 'the last true figures are still drawn')
+    assert.equal(later.fetchedAt, good.fetchedAt, 'and their age is still their age')
+    assert.equal(mounted.read().state, 'idle', 'the light never moved')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: no credential service costs the account, not the light', async () => {
+  // An unsatisfied `inject` leaves the child waiting and never applied. That is
+  // the whole reason the account is a child plugin: the publisher itself must
+  // mount in any composition.
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY), credentials: false })
   try {
-    await sleep(25)
-    assert.equal(mounted.calls.length, 0, 'an unset key must not reach the network')
-    assert.equal(mounted.read().meta.account.reason, 'no-key')
+    await sleepReal(25)
+    const doc = mounted.read()
+    assert.equal(mounted.calls.length, 0, 'nothing to fetch with, so nothing is fetched')
+    assert.equal(doc.meta.account, undefined, 'and no block is published from nowhere')
+    assert.equal(doc.state, 'idle')
+    assert.equal(doc.reason, 'init')
+    assert.equal(mounted.scheduled.length, 0, 'the child never scheduled a lookup either')
   } finally {
     mounted.restore()
   }
