@@ -1,0 +1,26 @@
+{
+  "name": "dsh-status",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Publishes the root agent's turn state to a JSON file that a native indicator can read. Stage 1 of the DSH status light.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/run.js && node test/cordis.js"
+  },
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

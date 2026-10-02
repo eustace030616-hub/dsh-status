@@ -1,0 +1,12 @@
+# Self-installing row for the DSH status publisher.
+#
+# `dsh.bundle.patch` in package.json points here, so a market/CLI install
+# activates the layer automatically — no hand-edited profile YAML. When the
+# package is placed by hand instead (see README), copy this same `insert` row
+# into the profile's cordis.patch.yml and point `name` at the entry file.
+#
+# No `config:` block on purpose: every key has a documented default in
+# lib/config.js, so there is no machine-specific path baked into the package.
+- insert:
+    - id: dsh-status
+      name: 'dsh-status'
