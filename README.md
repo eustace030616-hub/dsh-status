@@ -9,15 +9,49 @@ document, no socket between them.
 
 ## Install
 
-Paste this into DSH's plugin page (sidebar → **Plugins**), then restart DSH:
+### The plugin
+
+Add the repository in DSH's plugin page (sidebar → **Plugins**), and restart DSH:
 
 ```
 github:eustace030616-hub/traffic-light
 ```
 
-The daemon ships inside the package (`bin/`) and the plugin starts it on mount, so that is the whole
-install: nothing to clone, nothing to build. (Working on it instead? `git clone` and `scripts/install.sh`
-mount a clone by path.)
+`https://github.com/eustace030616-hub/traffic-light` works too: the manager normalises `github:` / `gist:` /
+`git+` prefixes and pre-checks a github.com address with `git ls-remote` before pnpm runs. Because the
+package declares `dsh.bundle`, the manager applies its overlay patch itself — the plugin lands in the
+profile's `node_modules` and is mounted as a profile layer, so the row's `name: 'dsh-status'` resolves as a
+real package. (A package *without* `dsh.bundle` installs as a plain dependency with a warning, and that
+warning is how you tell auto-mount did not happen.)
+
+Restarting is not optional: config changes are applied live when HMR is available, but a packaged Electron
+host gets only the config-watching subset, and a newly installed module needs a boot. The restart also ends
+the session you are in.
+
+### The daemon
+
+**There is nothing to install.** `DSHLight.app` ships inside the same package, under `bin/`, and the plugin
+starts it when it mounts and stops it on dispose — no clone, no build, no toolchain, no Apple account, and
+no second download to keep in step with the first.
+
+Want the light without the plugin — a machine that only reads a state file, or while changing the Swift —
+clone and open the shipped bundle:
+
+```bash
+git clone https://github.com/eustace030616-hub/traffic-light.git ~/traffic-light
+open ~/traffic-light/bin/DSHLight.app
+```
+
+It reads `~/Library/Application Support/dsh-status/state.json` unless told otherwise with `--state-file`,
+and `--print` follows the light in a terminal instead of drawing it. Building it from source is in
+[The daemon](#the-daemon), along with the flags — including `--open` and `--ack-app`, which a browser-hosted
+DSH needs so the double-click and the return-to-DSH acknowledgement know where to go.
+
+### Developing on the plugin
+
+`scripts/install.sh` mounts a clone by path in the profile patch layer instead: `--print` shows the row
+without touching anything, `--uninstall` restores the newest backup. It appends rather than replaces that
+file, because it is live config and a malformed patch can stop DSH from starting.
 
 ## Usage
 

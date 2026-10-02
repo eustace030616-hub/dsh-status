@@ -29,6 +29,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   file went `working / prompt` → `waiting / turn-end` at 23:15:08, and the next prompt overwrote it, exactly
   as the heartbeat model predicts. That Known-gap bullet is gone, and `agent/status: idle` remains the seam
   that covers the endings `turn-stopping` misses.
+- **Install is the one section that stayed long, on purpose** (186 → 220 lines): the plugin half explains
+  what the manager does with the address and why the restart is not optional, and the daemon half says the
+  thing a reader will otherwise hunt for — there is nothing to install, it ships in the same package, and
+  `git clone` + `open bin/DSHLight.app` is the whole of the by-hand route. The clone-by-path plugin install
+  is a short third part, and documents `scripts/install.sh` again.
 
 ## [0.7.14] - 2026-10-02
 
