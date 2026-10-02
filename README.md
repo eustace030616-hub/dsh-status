@@ -51,6 +51,9 @@ prompt cost, token counts, model name, a prompt preview for hover — goes into 
 keys are only ever *added*. Nothing is renamed or removed. `version` changes only if a reader
 written against the old shape would be wrong. `meta.cwd` is already there as the first tenant.
 
+The package version and the contract version move independently, and every change to the contract is
+recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## Why the state machine looks like this
 
 | Transition | Trigger | Why |
