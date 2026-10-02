@@ -63,6 +63,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   returning the real answerer's result untouched; concurrent asks are counted, and the light stays
   blue until the last one is answered. Deliberately not root-filtered — a subagent's approval still
   needs the human — which is the one place the root filter does not apply.
+- **Every click action now needs a double-click.** A single click is inert, so a stray one while the
+  user is working elsewhere cannot take their screen; and the gesture is explicit, which also removes
+  the race where two quick clicks could land in either application depending on whether the first
+  activation had been observed yet. Dragging is still a plain drag.
 - **A click toggles between the answer and the work.** Green, blue and red bring DSH forward, because
   something finished, is blocked, or is broken. Grey and yellow toggle both ways: back to the
   application the user came from when DSH is in front, and forward to DSH when it is not — a way in as

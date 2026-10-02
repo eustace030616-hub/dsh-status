@@ -150,8 +150,9 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 `mac/` builds **DSHLight.app**: one dot that reads the state document and shows yellow (working),
 green (the turn is over and nobody has looked yet), grey (rest) or red (the feed itself is broken)
 above every window, on every Space, and over another application's fullscreen window. A green finish
-settles to grey once you are back at DSH, because the reminder has been served. Click it to bring DSH
-forward; drag it to move it, and it remembers where you left it.
+settles to grey once you are back at DSH, because the reminder has been served. **Double-click it to
+move between DSH and where you were**; drag it to reposition, and it remembers where you left it. A
+single click is deliberately inert.
 
 ```bash
 ./mac/build.sh              # universal binary, ad-hoc signed, into ./build
@@ -186,9 +187,9 @@ Three properties worth keeping:
   keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
   has not learned yet are all rest, and the reminder green is what stands out because nothing else
   competes with it.
-- **A click means "take me to what needs me", then "put me back".** Green (finished), blue (blocked on
-  an answer) and red (no signal) bring DSH forward, because something needs you. Grey (rest) and yellow
-  (working) **toggle**: if DSH is in front they put you back in the application you came from, and if
+- **The gesture is a double-click, so a stray click can never move you.** Green (finished), blue
+  (blocked on an answer) and red (no signal) bring DSH forward, because something needs you. Grey
+  (rest) and yellow (working) **toggle**: if DSH is in front they put you back in the application you came from, and if
   it is not they bring DSH forward — one control for both directions, so the light is a way in as well
   as a way out. When there is nowhere to return to it says so rather than silently doing nothing. It restores the *application*, which is as far as public API reaches — macOS
   will not let one application select another's window or browser tab — but that is what "back to my

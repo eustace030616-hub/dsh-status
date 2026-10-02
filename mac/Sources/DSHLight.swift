@@ -328,7 +328,8 @@ struct Options {
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
                [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
-          apps. Click it to bring DSH forward, drag it to move it.
+          apps. DOUBLE-CLICK it to move between DSH and the application you came
+          from; drag it to reposition. A single click does nothing on purpose.
           LEVEL is floating, status or screensaver (default screensaver).
 
           A green finish rests as soon as you come back to DSH — either by
@@ -435,7 +436,7 @@ func runPrintMode(_ options: Options) {
         } else {
             to = acknowledgement.map { _ in "dsh" } ?? "dsh (acknowledgement off)"
         }
-        let clickLine = "[click on rest/working: \(from) -> \(to)]"
+        let clickLine = "[double-click on rest/working: \(from) -> \(to)]"
         if clickLine != announcedReturn {
             announcedReturn = clickLine
             print("  \(clickLine)")
@@ -473,6 +474,9 @@ final class DotView: NSView {
     private var originAtDragStart: NSPoint?
     private var mouseAtDragStart: NSPoint?
     private var dragged = false
+    /// Read on mouse-down, which is where AppKit sets it reliably. The gesture
+    /// is two clicks on purpose: one stray click must not move the user.
+    private var clicksAtMouseDown = 1
 
     private func colour(for light: Light) -> NSColor {
         switch light {
@@ -505,6 +509,7 @@ final class DotView: NSView {
         originAtDragStart = window?.frame.origin
         mouseAtDragStart = NSEvent.mouseLocation
         dragged = false
+        clicksAtMouseDown = event.clickCount
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -523,7 +528,9 @@ final class DotView: NSView {
         }
         if dragged {
             if let origin = window?.frame.origin { onMove?(origin) }
-        } else {
+        } else if clicksAtMouseDown >= 2 {
+            // Only the second click acts. A single click is inert, so a stray
+            // one while working elsewhere cannot take the screen away.
             onTap?()
         }
     }
