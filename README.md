@@ -207,9 +207,11 @@ To follow the light in a terminal instead — printed once, then only when it ch
 
 The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
-and dark appearance on its own. The body is **half the material's own strength** (`bodyOpacity`, 0.5) — a hint
-of a shape rather than a panel with a light standing in it — and it is one of the two parts of the look with
-no slider, the other being the corner radius.
+and dark appearance on its own. The body is **half the material's own strength** (`bodyOpacity`, 0.5) with a
+**wash of black at 0.15 over it** (`bodyShade`), because the material is a light grey in light appearance and
+read as too bright against a bright wallpaper. Darkening it rather than thinning it further is deliberate: a
+fainter body dissolves into whatever is behind it, a darker one keeps its shape in both appearances. Neither
+is a slider, and neither is the corner radius — the three parts of the look that are fixed rather than dialled.
 
 The body and the light are **siblings, not parent and child**. They were nested until the body needed to be
 fainter than opaque, and a view's alpha applies to everything inside it: the lenses would have faded along
@@ -304,8 +306,12 @@ account that cannot be read is a row in a list and never a lens. `is_available: 
 for API calls — is a row too, for the same reason: the bulbs answer for the agent, not for the account. A
 stale feed is still drawn, because the last figures it was given are worth showing next to how old they are.
 
-There is no highlight on the lenses, and no glass in them: a flat disc with a rim. A white highlight in
-the upper left was tried and asked away — at this size it was the busiest thing on the screen.
+There is no highlight on the lenses, and no glass in them: a flat disc with a ring. A white highlight in the
+upper left was tried and asked away — at this size it was the busiest thing on the screen. The ring is a light
+grey (`rimGrey`, 0.45) rather than black, at an opacity left exactly where the black one had it (`rimAlpha`,
+0.45): black at this size drew a hard edge the eye went to before the lens it was outlining. Measured from a
+rendered lens over white, the ring reads 0.805 where a black one would read 0.550, against a resting disc at
+0.918.
 
 Three properties worth keeping:
 

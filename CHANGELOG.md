@@ -15,6 +15,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-10-02
+
+### Changed
+
+- **The grey body is darker**, for light appearance: a wash of black at 0.15 (`bodyShade`) over the material,
+  which read as too bright against a bright wallpaper in the middle of the day. Darkening rather than thinning
+  it further is the point — 0.7.4 took the body's own opacity to 0.5, and going lower dissolves the body into
+  whatever is behind it, where a darker body keeps its shape in both appearances. The wash is a sibling of the
+  material with the same corner radius, so it follows the size slider like the body does.
+- **The ring around a lens is a light grey rather than black** (`rimGrey`, 0.45), at an opacity that is
+  deliberately unchanged (`rimAlpha`, 0.45). Measured from a rendered lens over white: the ring reads 0.805
+  where black read 0.550, against a resting disc at 0.918 — a softer edge that stops competing with the lens
+  it outlines.
+- Both are constants in the source rather than settings, which is what "keep it as the default" means here:
+  every install gets them, existing ones included, because neither was ever a remembered value.
+
 ## [0.7.4] - 2026-10-02
 
 ### Changed

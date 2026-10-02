@@ -802,6 +802,12 @@ final class TrafficLightView: NSView {
     /// When the first of the two clicks landed, so the dot can show it arrived.
     private var pendingUntil: Date?
 
+    /// The ring around a lens: how light it is, and how solid. The opacity is not
+    /// a dial — it was chosen with the old black ring and is left exactly where it
+    /// was, so only the colour of the edge changed.
+    private static let rimGrey: CGFloat = 0.45
+    private static let rimAlpha: CGFloat = 0.45
+
     /// A slow breath rather than a blink: a session blocked on the user should
     /// read as alive, not as an alarm. It never goes fully dark.
     private static let breathPeriod: Double = 2.6
@@ -910,11 +916,15 @@ final class TrafficLightView: NSView {
         }
         NSBezierPath(ovalIn: rect).fill()
 
-        // A flat disc with a rim, and nothing else. The white highlight that
-        // used to sit in the upper left made the lenses read as glass, and it
-        // was asked for and then asked away: at this size it was the busiest
-        // thing on the screen, and a traffic light is not a lens.
-        NSColor.black.withAlphaComponent(0.45).setStroke()
+        // A flat disc with a ring, and nothing else. The white highlight that
+        // used to sit in the upper left made the lenses read as glass, and it was
+        // asked for and then asked away: at this size it was the busiest thing on
+        // the screen, and a traffic light is not a lens.
+        //
+        // The ring is a light grey, not black, at an opacity that is deliberately
+        // unchanged at 0.45: black at this size drew a hard edge that the eye went
+        // to before the lens it was outlining.
+        NSColor(white: Self.rimGrey, alpha: Self.rimAlpha).setStroke()
         let rim = NSBezierPath(ovalIn: rect)
         rim.lineWidth = 1
         rim.stroke()
@@ -972,6 +982,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var view: TrafficLightView?
     private var backdrop: NSVisualEffectView?
+    /// The wash that darkens the body, kept so its corners follow a resize.
+    private var shade: NSView?
     private var timer: Timer?
     private let finishes = FinishTracker()
     private var look = Look.standard
@@ -986,6 +998,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// than as a panel with a light standing in it. There is no slider for this
     /// one — it is the closest thing the light has to a fixed piece of its look.
     private static let bodyOpacity: CGFloat = 0.5
+
+    /// How much black is washed over that material.
+    ///
+    /// The material is a *light* grey in light appearance, which read as too
+    /// bright against a bright wallpaper in the middle of the day. Darkening it
+    /// rather than turning the body's opacity down again is deliberate: a fainter
+    /// body dissolves into whatever is behind it, while a darker one keeps its
+    /// shape and reads as a body in both appearances.
+    private static let bodyShade: CGFloat = 0.15
     /// The platform's top-up page: the same destination DSH's own account service
     /// publishes for this (`/top_up` against the platform origin), so the list is
     /// not inventing a URL that could drift from the product's.
@@ -1064,6 +1085,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backdrop.layer?.cornerRadius = look.cornerRadius
         backdrop.layer?.masksToBounds = true
 
+        let shade = NSView(frame: NSRect(origin: .zero, size: size))
+        shade.wantsLayer = true
+        shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(Self.bodyShade).cgColor
+        shade.layer?.cornerRadius = look.cornerRadius
+        shade.layer?.masksToBounds = true
+        shade.autoresizingMask = [.width, .height]
+
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
         view.autoresizingMask = [.width, .height]
         view.look = look
@@ -1071,6 +1099,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
         container.addSubview(backdrop)
+        container.addSubview(shade)
         container.addSubview(view)
         window.contentView = container
 
@@ -1080,6 +1109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
         self.view = view
         self.backdrop = backdrop
+        self.shade = shade
         dock()
 
         refresh()
@@ -1161,6 +1191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // large one.
         view?.look = look
         backdrop?.layer?.cornerRadius = look.cornerRadius
+        shade?.layer?.cornerRadius = look.cornerRadius
 
         UserDefaults.standard.set(side.rawValue, forKey: Self.sideKey)
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
