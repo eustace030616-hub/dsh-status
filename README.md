@@ -197,11 +197,10 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--print` | follow in the terminal instead of drawing a window |
 | `--interval SECONDS` | poll interval, default `0.25` |
 | `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
-| `--style classic\|nostalgic` | appearance, overriding what was chosen last |
 | `--ack-app BUNDLE-ID` | another application whose return to the front settles a green; repeatable |
 | `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
-| `--size POINTS` | dot diameter, default `24` |
+| `--size POINTS` | lens size for this run, overriding the size slider |
 
 The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
 rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
@@ -225,18 +224,31 @@ clear of a corner can turn it. Whatever happens, the final position is clamped i
 so no shape change can park the light out of reach.
 
 ```
-Style
-  ✓ Classic
-    Nostalgic
+Size   ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  22 pt
+Gap    ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   8 pt
+Rest   ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   20%
+Lit    ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   80%
 ─────────────
    (reserved for the next thing)
 ─────────────
 Quit the light
 ```
 
-The style persists between runs, with `--style` overriding it at launch. Orientation is not a setting at
-all: it follows the border the light is docked to, so the two can never disagree. The separated group is
-where the next feature goes, and a single menu column gives every row the same width for free.
+**The light is four numbers, and the list is where they are set.** There is no style to choose: one
+slider each for the size of a lens, the gap between the lenses, and how solid a resting and a lit lens
+are. Every slider applies **as it is dragged** — the window is re-fitted and re-anchored on each step, so
+the light on screen is the preview rather than a change that lands when the list closes. The values are
+remembered between runs, and `--size` overrides the size slider for a single run.
+
+A slider is a real control in a menu row, not a label: the row is a small view holding a hand-drawn knob,
+because the one event a menu is documented to push into a view it hosts is the mouse, while a stock
+`NSSlider` pulls its own drags out of the event queue instead. The knob snaps to whole points and whole
+percents, so it can always reach the number the readout prints. While the list is open the light drops a
+level, below the menu, so a lens growing under a row cannot take the clicks meant for it.
+
+Orientation is not a setting at all: it follows the border the light is docked to, so the two can never
+disagree. The separated group is where the next feature goes — one row, in the same column, so every row
+keeps the same width for free.
 
 Three properties worth keeping:
 

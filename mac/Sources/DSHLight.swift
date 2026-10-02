@@ -393,12 +393,12 @@ struct Options {
     var printMode = false
     var openTarget = "/Applications/DSH Desktop.app"
     var level: NSWindow.Level = .screenSaver
-    var diameter: CGFloat = 24
+    /// Lens size for this run, overriding the size slider. The sliders are the
+    /// normal way to set this; the flag is for a script that wants one shape.
+    var lens: CGFloat?
     var interval = 0.25
     /// Bundle identifiers whose return to the front acknowledges a finish.
     var ackTargets: Set<String> = []
-    /// Appearance override; nil means "use whatever was chosen last".
-    var style: LightStyle?
     /// Set by --no-ack: green is kept until the publisher says otherwise.
     var ackDisabled = false
 
@@ -410,7 +410,7 @@ struct Options {
           change. Ctrl-C to stop.
 
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
-               [--style classic|nostalgic] [--level LEVEL] [--size POINTS]
+               [--level LEVEL] [--size POINTS]
           Draw the light above every window, on every Space, over fullscreen
           apps. It docks to the nearest screen border when you drop it, and the
           border decides the shape: lenses stack on a side edge and lie in a row
@@ -419,6 +419,10 @@ struct Options {
           whatever is lit. RIGHT-CLICK opens the list. Dragging docks it
           elsewhere, and a single click does nothing on purpose.
           LEVEL is floating, status or screensaver (default screensaver).
+          The list holds one slider each for the size of a lens, the gap
+          between them, and how solid a resting and a lit lens are. Every
+          slider applies as it is dragged and is remembered afterwards.
+          --size POINTS overrides the size slider for this run only.
 
           A finish rests as soon as DSH is in front: you are looking at it, so
           the reminder has done its job. A session blocked on you breathes the
@@ -449,9 +453,7 @@ struct Options {
             case "--interval":
                 if let raw = value(), let seconds = Double(raw), seconds > 0 { options.interval = seconds }
             case "--size":
-                if let raw = value(), let points = Double(raw), points > 4 { options.diameter = CGFloat(points) }
-            case "--style":
-                options.style = value() == "nostalgic" ? .nostalgic : .classic
+                if let raw = value(), let points = Double(raw) { options.lens = CGFloat(points) }
             case "--ack-app":
                 if let identifier = value() { options.ackTargets.insert(identifier) }
             case "--no-ack":
@@ -558,16 +560,118 @@ func runPrintMode(_ options: Options) {
 
 // MARK: - Appearance
 
-/// Two visual languages. A style never assumes an orientation: the two are
-/// independent axes, and every combination has to work.
-enum LightStyle: String, CaseIterable {
-    case classic
-    case nostalgic
+/// Everything about the light the user can dial in, in one place.
+///
+/// There is no style to choose any more: there is one light, and the four
+/// numbers below are the sliders in the right-click list. They persist, so the
+/// light comes back the way it was left, and they are the only thing the
+/// window size, the drawing and the snapping have to agree about.
+struct Look {
+    var lens: CGFloat
+    var gap: CGFloat
+    /// How solid an unlit lens is.
+    var restAlpha: Double
+    /// How solid the lit lens is, before the breath on top of it.
+    var litAlpha: Double
+
+    static let lensRange: ClosedRange<Double> = 12...48
+    static let gapRange: ClosedRange<Double> = 0...24
+    static let restRange: ClosedRange<Double> = 0.04...0.60
+    static let litRange: ClosedRange<Double> = 0.20...1.00
+
+    /// The values the light was tuned to by hand before the sliders existed, so
+    /// a fresh install looks like the light that was approved rather than like
+    /// a new object.
+    static let standard = Look(lens: 31, gap: 10, restAlpha: 0.20, litAlpha: 0.80)
+
+    /// The two styles this build used to have, read once and translated into
+    /// slider values: whoever was on the 22-point flat light keeps a 22-point
+    /// light and dials it from there.
+    static func migrated(fromStyle style: String?) -> Look {
+        var look = standard
+        switch style {
+        case "classic":
+            look.lens = 22
+            look.gap = 8
+        case "nostalgic":
+            look.lens = 31
+            look.gap = 10
+        default:
+            break
+        }
+        return look
+    }
+
+    /// The housing is proportional rather than a setting: a fixed inset looks
+    /// like a collar around a small lens and like a hairline around a large one.
+    var padding: CGFloat {
+        min(14, max(6, (lens * 0.32).rounded()))
+    }
+
+    func size(_ orientation: LightOrientation) -> NSSize {
+        let lenses = 3
+        let length = CGFloat(lenses) * lens + CGFloat(lenses - 1) * gap + 2 * padding
+        let breadth = lens + 2 * padding
+        return orientation == .horizontal
+            ? NSSize(width: length, height: breadth)
+            : NSSize(width: breadth, height: length)
+    }
+}
+
+/// One slider of the list, declared as a case so that its label, its range, its
+/// readout and the place its value goes are each written once. A fifth control
+/// is then one case rather than a fifth copy of the same row.
+enum LookField: String, CaseIterable {
+    case size, gap, rest, lit
 
     var title: String {
         switch self {
-        case .classic: return "Classic"
-        case .nostalgic: return "Nostalgic"
+        case .size: return "Size"
+        case .gap: return "Gap"
+        case .rest: return "Rest"
+        case .lit: return "Lit"
+        }
+    }
+
+    var range: ClosedRange<Double> {
+        switch self {
+        case .size: return Look.lensRange
+        case .gap: return Look.gapRange
+        case .rest: return Look.restRange
+        case .lit: return Look.litRange
+        }
+    }
+
+    /// Whole points for the two spacings, whole percents for the two opacities.
+    var step: Double {
+        switch self {
+        case .size, .gap: return 1
+        case .rest, .lit: return 0.01
+        }
+    }
+
+    func value(of look: Look) -> Double {
+        switch self {
+        case .size: return Double(look.lens)
+        case .gap: return Double(look.gap)
+        case .rest: return look.restAlpha
+        case .lit: return look.litAlpha
+        }
+    }
+
+    func set(_ value: Double, on look: inout Look) {
+        switch self {
+        case .size: look.lens = CGFloat(value)
+        case .gap: look.gap = CGFloat(value)
+        case .rest: look.restAlpha = value
+        case .lit: look.litAlpha = value
+        }
+    }
+
+    func readout(_ value: Double) -> String {
+        switch self {
+        case .size, .gap: return "\(Int(value.rounded())) pt"
+        case .rest, .lit: return "\(Int((value * 100).rounded()))%"
         }
     }
 }
@@ -581,36 +685,6 @@ enum LightOrientation: String, CaseIterable {
         case .horizontal: return "Horizontal"
         case .vertical: return "Vertical"
         }
-    }
-}
-
-/// Lens measurements for one style, in one place, so the window size, the
-/// drawing and the snapping cannot disagree about how big the light is.
-struct LightGeometry {
-    var lens: CGFloat
-    var gap: CGFloat
-    var padding: CGFloat
-    /// Whether the lenses get the glass treatment: a highlight and a heavier
-    /// rim. The backdrop itself is shared, so both styles sit on the same panel.
-    var glassy: Bool
-
-    static func of(_ style: LightStyle) -> LightGeometry {
-        switch style {
-        // Lenses are 20% larger than they began: 18 -> 22 and 26 -> 31, rounded
-        // to whole points so the circles stay crisp. The gaps are unchanged, so
-        // the light reads as chunkier bulbs in the same shape.
-        case .classic: return LightGeometry(lens: 22, gap: 8, padding: 8, glassy: false)
-        case .nostalgic: return LightGeometry(lens: 31, gap: 10, padding: 10, glassy: true)
-        }
-    }
-
-    func size(_ orientation: LightOrientation) -> NSSize {
-        let lenses = 3
-        let length = CGFloat(lenses) * lens + CGFloat(lenses - 1) * gap + 2 * padding
-        let breadth = lens + 2 * padding
-        return orientation == .horizontal
-            ? NSSize(width: length, height: breadth)
-            : NSSize(width: breadth, height: length)
     }
 }
 
@@ -643,7 +717,7 @@ final class TrafficLightView: NSView {
             needsDisplay = true
         }
     }
-    var style: LightStyle = .classic {
+    var look = Look.standard {
         didSet { needsDisplay = true }
     }
     var orientation: LightOrientation = .horizontal {
@@ -722,37 +796,37 @@ final class TrafficLightView: NSView {
 
     /// Lenses in fixed order, laid out along the current axis.
     private func lensRects() -> [(Lens, NSRect)] {
-        let geometry = LightGeometry.of(style)
-        let step = geometry.lens + geometry.gap
-        return [Lens.red, .yellow, .green].enumerated().map { index, lens in
+        let lens = look.lens
+        let padding = look.padding
+        let step = lens + look.gap
+        return [Lens.red, .yellow, .green].enumerated().map { index, lensOfLight in
             let distance = CGFloat(index) * step
             let rect: NSRect
             if orientation == .horizontal {
                 rect = NSRect(
-                    x: geometry.padding + distance,
-                    y: geometry.padding,
-                    width: geometry.lens,
-                    height: geometry.lens
+                    x: padding + distance,
+                    y: padding,
+                    width: lens,
+                    height: lens
                 )
             } else {
                 rect = NSRect(
-                    x: geometry.padding,
-                    y: bounds.height - geometry.padding - geometry.lens - distance,
-                    width: geometry.lens,
-                    height: geometry.lens
+                    x: padding,
+                    y: bounds.height - padding - lens - distance,
+                    width: lens,
+                    height: lens
                 )
             }
-            return (lens, rect)
+            return (lensOfLight, rect)
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let geometry = LightGeometry.of(style)
         let lit = litLens()
 
         for (lens, rect) in lensRects() {
             let isLit = lens == lit
-            draw(lens: lens, in: rect, lit: isLit, level: isLit ? level(for: lens) : 0, glassy: geometry.glassy)
+            draw(lens: lens, in: rect, lit: isLit, level: isLit ? level(for: lens) : 0)
         }
 
         if let until = pendingUntil, Date() < until {
@@ -767,34 +841,32 @@ final class TrafficLightView: NSView {
         }
     }
 
-    private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, glassy: Bool) {
+    private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double) {
         let colour = colour(of: lens)
         if lit {
-            // Twenty percent down from opaque: a lit lens still reads as glass
-            // rather than as a flat sticker.
-            colour.withAlphaComponent(0.8 * level).setFill()
+            colour.withAlphaComponent(CGFloat(look.litAlpha) * level).setFill()
         } else {
             // A resting lens is dark glass, not a hole: visible enough that the
-            // traffic light still reads as one when nothing is lit. One value
-            // for both styles, so rest looks the same either way.
-            colour.withAlphaComponent(0.20).setFill()
+            // traffic light still reads as one when nothing is lit. Its solidity
+            // is the Rest slider.
+            colour.withAlphaComponent(CGFloat(look.restAlpha)).setFill()
         }
         NSBezierPath(ovalIn: rect).fill()
 
-        if glassy {
-            // The beginnings of a glass read: a highlight in the upper left,
-            // brighter when the lens is lit. The texture is refined later.
-            let shine = NSRect(
-                x: rect.minX + rect.width * 0.20,
-                y: rect.minY + rect.height * 0.58,
-                width: rect.width * 0.42,
-                height: rect.height * 0.24
-            )
-            NSColor.white.withAlphaComponent(lit ? 0.18 + 0.22 * level : 0.05).setFill()
-            NSBezierPath(ovalIn: shine).fill()
-        }
+        // Glass, not a flat sticker: a highlight in the upper left, brighter
+        // when the lens is lit, and a heavier rim than a plain circle would
+        // have. This used to be what the nostalgic style added; with one light
+        // left it is simply how the lenses are made.
+        let shine = NSRect(
+            x: rect.minX + rect.width * 0.20,
+            y: rect.minY + rect.height * 0.58,
+            width: rect.width * 0.42,
+            height: rect.height * 0.24
+        )
+        NSColor.white.withAlphaComponent(lit ? 0.18 + 0.22 * level : 0.05).setFill()
+        NSBezierPath(ovalIn: shine).fill()
 
-        NSColor.black.withAlphaComponent(glassy ? 0.45 : 0.22).setStroke()
+        NSColor.black.withAlphaComponent(0.45).setStroke()
         let rim = NSBezierPath(ovalIn: rect)
         rim.lineWidth = 1
         rim.stroke()
@@ -851,9 +923,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let options: Options
     private var window: NSWindow?
     private var view: TrafficLightView?
+    private var backdrop: NSVisualEffectView?
     private var timer: Timer?
     private let finishes = FinishTracker()
-    private var style: LightStyle = .classic
+    private var look = Look.standard
     private var border: ScreenBorder = .right
     /// How far the light sits from the border it is docked to.
     private static let dockInset: CGFloat = 10
@@ -861,12 +934,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Around one the nearest border is a coin toss, and a change of direction
     /// there resizes the light — which is how it ended up half off the screen.
     private static let cornerZone: CGFloat = 60
+    /// How far above the point passed to `popUp` the top of the list lands.
+    ///
+    /// Measured, not documented: a menu is placed by its top-left corner, and
+    /// this one puts its top five points higher than the point given, on every
+    /// menu height and at every anchor tried. It used to pass unnoticed because
+    /// the light outranked the list and swallowed the overlap; now that the list
+    /// is drawn over the light, five points is the difference between flush and
+    /// a light with its bottom edge sliced off.
+    private static let menuTopBias: CGFloat = 5
     private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
         ? nil
         : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
 
     private static let originKey = "DSHLight.windowOrigin"
-    private static let styleKey = "DSHLight.style"
+    private static let lookKey = "DSHLight.look"
+    /// Where a style used to be remembered, read once to seed the look above.
+    private static let legacyStyleKey = "DSHLight.style"
     private static let borderKey = "DSHLight.border"
 
     init(options: Options) {
@@ -875,12 +959,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults = UserDefaults.standard
-        style = options.style
-            ?? LightStyle(rawValue: defaults.string(forKey: Self.styleKey) ?? "")
-            ?? .classic
+        look = loadLook(defaults: defaults)
+        if let wanted = options.lens {
+            look.lens = min(max(wanted, CGFloat(Look.lensRange.lowerBound)),
+                            CGFloat(Look.lensRange.upperBound)).rounded()
+        }
         border = ScreenBorder(rawValue: defaults.string(forKey: Self.borderKey) ?? "") ?? .right
 
-        let size = LightGeometry.of(style).size(border.orientation)
+        let size = look.size(border.orientation)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
@@ -911,7 +997,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
         view.autoresizingMask = [.width, .height]
-        view.style = style
+        view.look = look
         view.orientation = border.orientation
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
@@ -924,6 +1010,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         self.window = window
         self.view = view
+        self.backdrop = backdrop
         dock()
 
         refresh()
@@ -971,7 +1058,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         let visible = usableFrame(of: screen)
         border = borderToAdopt(for: window.frame, in: visible)
-        let want = LightGeometry.of(style).size(border.orientation)
+        let want = look.size(border.orientation)
 
         // Grow inward from the border it is heading to, so a change of shape
         // never throws the light across the screen.
@@ -999,8 +1086,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - want.height))
         window.setFrameOrigin(origin)
 
-        view?.style = style
+        // The rounded body has to follow the size the sliders give it: a radius
+        // tuned for one shape is a circle on a small light and a square on a
+        // large one.
+        view?.look = look
         view?.orientation = border.orientation
+        backdrop?.layer?.cornerRadius = min(14, want.height * 0.32)
 
         UserDefaults.standard.set(border.rawValue, forKey: Self.borderKey)
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
@@ -1074,11 +1165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The list hangs inward from the border the light is docked to, so a docked
     /// light never opens a menu off the edge of the screen.
     ///
-    /// `popUp(positioning:at:in:)` puts the menu's **top-left** corner at the
-    /// point, so every y below is the menu's *top*, not its bottom. Reading them
-    /// as the bottom is what left a gap the height of the menu beneath a light
-    /// docked to the top or bottom edge — and only there, because a side-docked
-    /// light lines the two tops up anyway.
+    /// Placement is worked out as the list's own top-left corner — `left` and
+    /// `top` below — and only converted to the point `popUp` wants at the end,
+    /// because that point is not the corner: the window lands `menuTopBias`
+    /// points higher. Reading the point as the top is what left a gap the height
+    /// of the menu beneath a light docked to the top or bottom edge, and only
+    /// there, because a side-docked light lines the two tops up anyway.
     private func showMenu() {
         guard let window else { return }
         let menu = buildMenu()
@@ -1086,49 +1178,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let width = menu.size.width
         let height = menu.size.height
 
-        var point: NSPoint
+        var left: CGFloat
+        var top: CGFloat
         switch border {
-        case .right: point = NSPoint(x: frame.minX - width, y: frame.maxY)
-        case .left: point = NSPoint(x: frame.maxX, y: frame.maxY)
-        case .top: point = NSPoint(x: frame.minX, y: frame.minY)
-        case .bottom: point = NSPoint(x: frame.minX, y: frame.maxY + height)
+        case .right: left = frame.minX - width; top = frame.maxY
+        case .left: left = frame.maxX; top = frame.maxY
+        case .top: left = frame.minX; top = frame.minY
+        case .bottom: left = frame.minX; top = frame.maxY + height
         }
 
         // And keep the whole list on the screen it was opened from.
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         let margin: CGFloat = 4
-        let lowest = visible.minY + height + margin
-        point.x = min(max(point.x, visible.minX + margin), max(visible.minX + margin, visible.maxX - width - margin))
-        point.y = min(max(point.y, lowest), max(lowest, visible.maxY - margin))
+        left = min(max(left, visible.minX + margin), max(visible.minX + margin, visible.maxX - width - margin))
+        top = min(max(top, visible.minY + height + margin), max(visible.minY + height + margin, visible.maxY - margin))
+        let point = NSPoint(x: left, y: top - Self.menuTopBias)
 
+        // The light's window outranks a menu on purpose, so while the list is
+        // open it steps down. Otherwise the list — and the sliders in it — would
+        // be drawn under the very window they are changing, and a lens growing
+        // across a row would take the clicks meant for it.
+        let level = window.level
+        window.level = .floating
         menu.popUp(positioning: nil, at: point, in: nil)
+        window.level = level
+        window.orderFrontRegardless()
     }
 
-    /// Groups in one list, so a future feature is one entry — and a single
-    /// column gives every row the same width for free.
+    /// One row per slider, in one column, so every row is the same width and a
+    /// future feature is one more row.
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        menu.addItem(header("Style"))
-        for style in LightStyle.allCases {
-            let item = choice(style.title, on: style == self.style, action: #selector(chooseStyle(_:)), tag: 0)
-            item.representedObject = style
+        for field in LookField.allCases {
+            let row = SliderRow(field: field, value: field.value(of: look))
+            row.onChange = { [weak self] value in
+                self?.applyLook { field.set(value, on: &$0) }
+            }
+            let item = NSMenuItem()
+            item.view = row
+            item.isEnabled = true
             menu.addItem(item)
         }
 
-        // Reserved: the next feature goes here, between separators.
-        menu.addItem(.separator())
+        // Reserved: the next feature goes above this line, beside the sliders,
+        // in the same single column. One separator, not two: AppKit collapses
+        // consecutive separators when it draws, but counts every one of them in
+        // `menu.size`, and the placement is worked out from that number — two
+        // of them left the list eleven points off a bottom-docked light.
         menu.addItem(.separator())
 
         menu.addItem(choice("Quit the light", on: false, action: #selector(quit), tag: 0))
         return menu
     }
 
-    private func header(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
+    // MARK: The look
+
+    /// The remembered numbers, with anything missing or out of range falling
+    /// back to the standard: a half-written or older set of values can never
+    /// produce a light this build cannot draw.
+    private func loadLook(defaults: UserDefaults) -> Look {
+        guard let saved = defaults.dictionary(forKey: Self.lookKey) else {
+            // First run after the styles were removed: keep the size whoever was
+            // using had chosen, write it down as slider values, and forget the
+            // style itself — a migration that is not stored would be run again
+            // next launch, and the launch after that would have nothing to read.
+            let migrated = Look.migrated(fromStyle: defaults.string(forKey: Self.legacyStyleKey))
+            defaults.removeObject(forKey: Self.legacyStyleKey)
+            store(migrated, in: defaults)
+            return migrated
+        }
+        func number(_ key: String) -> Double? { (saved[key] as? NSNumber)?.doubleValue }
+        func clamped(_ value: Double?, _ range: ClosedRange<Double>) -> Double? {
+            value.map { min(max($0, range.lowerBound), range.upperBound) }
+        }
+        var look = Look.standard
+        if let value = clamped(number("lens"), Look.lensRange) { look.lens = CGFloat(value.rounded()) }
+        if let value = clamped(number("gap"), Look.gapRange) { look.gap = CGFloat(value.rounded()) }
+        if let value = clamped(number("rest"), Look.restRange) { look.restAlpha = value }
+        if let value = clamped(number("lit"), Look.litRange) { look.litAlpha = value }
+        return look
+    }
+
+    private func saveLook() {
+        store(look)
+    }
+
+    private func store(_ look: Look, in defaults: UserDefaults = .standard) {
+        defaults.set([
+            "lens": Double(look.lens),
+            "gap": Double(look.gap),
+            "rest": look.restAlpha,
+            "lit": look.litAlpha
+        ], forKey: Self.lookKey)
+    }
+
+    /// A slider is a live control, so the light on screen is the preview: every
+    /// step re-fits and re-anchors the window rather than waiting for the list
+    /// to close. `dock()` is the one place that knows how, which is why a change
+    /// of size and a change of opacity take the same path.
+    private func applyLook(_ change: (inout Look) -> Void) {
+        change(&look)
+        saveLook()
+        dock()
+        window?.displayIfNeeded()
     }
 
     private func choice(_ title: String, on: Bool, action: Selector, tag: Int) -> NSMenuItem {
@@ -1139,19 +1293,166 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc private func chooseStyle(_ sender: NSMenuItem) {
-        guard let style = sender.representedObject as? LightStyle else { return }
-        self.style = style
-        UserDefaults.standard.set(style.rawValue, forKey: Self.styleKey)
-        // dock() re-fits the window and re-decides the orientation, so the light
-        // grows inward from the border it is already on.
-        dock()
-    }
-
     @objc private func quit() {
         NSApp.terminate(nil)
     }
 
+}
+
+// MARK: - The list's rows
+
+/// One labelled slider, as a row of the list.
+///
+/// The list is an `NSMenu`, and a menu item is allowed to carry a view, so a row
+/// is a small view with a slider in it. Every row is built the same way and the
+/// longest of them sets the width, which is what keeps the list a single column
+/// of equal widths.
+final class SliderRow: NSView {
+    static let width: CGFloat = 236
+    static let height: CGFloat = 30
+
+    private let field: LookField
+    private let name = NSTextField(labelWithString: "")
+    private let readout = NSTextField(labelWithString: "")
+    private let slider = MiniSlider()
+
+    /// Called on every step of a drag, with an already-stepped value.
+    var onChange: ((Double) -> Void)?
+
+    init(field: LookField, value: Double) {
+        self.field = field
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.height))
+
+        name.stringValue = field.title
+        name.font = .menuFont(ofSize: 0)
+        name.textColor = .labelColor
+        name.frame = NSRect(x: 14, y: 7, width: 40, height: 16)
+        name.autoresizingMask = [.maxXMargin, .minYMargin, .maxYMargin]
+
+        // Digits all one width, so the number does not shuffle sideways as it
+        // changes under the drag.
+        readout.stringValue = field.readout(value)
+        readout.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        readout.textColor = .secondaryLabelColor
+        readout.alignment = .right
+        readout.frame = NSRect(x: 178, y: 7, width: 44, height: 16)
+        readout.autoresizingMask = [.minXMargin, .minYMargin, .maxYMargin]
+
+        slider.range = field.range
+        slider.step = field.step
+        slider.value = value
+        slider.frame = NSRect(x: 62, y: 5, width: 112, height: 20)
+        slider.autoresizingMask = [.width, .minYMargin, .maxYMargin]
+        slider.onDrag = { [weak self] value in
+            guard let self else { return }
+            self.readout.stringValue = self.field.readout(value)
+            self.onChange?(value)
+        }
+
+        addSubview(name)
+        addSubview(slider)
+        addSubview(readout)
+        // A menu may be wider than its widest view; the slider takes the slack.
+        autoresizingMask = [.width]
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("not built from a nib")
+    }
+}
+
+/// A slider, drawn and tracked here rather than taken from AppKit.
+///
+/// The one event a menu is documented to push into a view it hosts is the mouse:
+/// `mouseDown:`, `mouseDragged:` and `mouseUp:`. A stock `NSSlider` pulls its own
+/// drags out of the event queue instead, and a control that never starts its own
+/// tracking loop cannot be left half working. This one follows the mouse the way
+/// the menu delivers it and reports every step, which is what makes the light
+/// track the knob rather than catch up when it is let go.
+final class MiniSlider: NSView {
+    var range: ClosedRange<Double> = 0...100
+    /// The granularity a drag snaps to: whole points for a size or a gap, whole
+    /// percents for an opacity. A slider that cannot reach a value the readout
+    /// can print is a slider that lies.
+    var step: Double = 1
+    var value: Double = 0 {
+        didSet { needsDisplay = true }
+    }
+    /// Every step of a drag, and the click that starts one.
+    var onDrag: ((Double) -> Void)?
+
+    private static let trackHeight: CGFloat = 4
+    private static let knobRadius: CGFloat = 6.5
+
+    /// The track stops one knob-radius short of each end, so the knob is never
+    /// half outside the row it belongs to.
+    private var usable: NSRect { bounds.insetBy(dx: Self.knobRadius, dy: 0) }
+
+    private func fraction(of value: Double) -> CGFloat {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return CGFloat(min(max((value - range.lowerBound) / span, 0), 1))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let usable = self.usable
+        let radius = Self.trackHeight / 2
+        let track = NSRect(
+            x: usable.minX,
+            y: bounds.midY - Self.trackHeight / 2,
+            width: usable.width,
+            height: Self.trackHeight
+        )
+        NSColor.quaternaryLabelColor.setFill()
+        NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius).fill()
+
+        // The travelled part is grey, not the accent colour: this light has no
+        // blue anywhere in it, and a blue bar under a traffic light would be the
+        // loudest thing on the screen.
+        let travelled = NSRect(
+            x: track.minX,
+            y: track.minY,
+            width: track.width * fraction(of: value),
+            height: track.height
+        )
+        if travelled.width > 0 {
+            NSColor.secondaryLabelColor.setFill()
+            NSBezierPath(roundedRect: travelled, xRadius: radius, yRadius: radius).fill()
+        }
+
+        let knob = NSRect(
+            x: track.minX + track.width * fraction(of: value) - Self.knobRadius,
+            y: bounds.midY - Self.knobRadius,
+            width: Self.knobRadius * 2,
+            height: Self.knobRadius * 2
+        )
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: knob).fill()
+        NSColor.black.withAlphaComponent(0.25).setStroke()
+        let rim = NSBezierPath(ovalIn: knob.insetBy(dx: 0.5, dy: 0.5))
+        rim.lineWidth = 1
+        rim.stroke()
+    }
+
+    /// The list can be open while this application is not the active one, and
+    /// the first click in a window is normally spent on activating it.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) { follow(event) }
+    override func mouseDragged(with event: NSEvent) { follow(event) }
+    override func mouseUp(with event: NSEvent) { follow(event) }
+
+    /// Put the knob where the mouse is and report it, on the way in and on every
+    /// step of the drag: the light has to move while the knob does.
+    private func follow(_ event: NSEvent) {
+        let usable = self.usable
+        guard usable.width > 0 else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let along = Double(min(max((point.x - usable.minX) / usable.width, 0), 1))
+        let wanted = range.lowerBound + along * (range.upperBound - range.lowerBound)
+        value = min(max((wanted / step).rounded() * step, range.lowerBound), range.upperBound)
+        onDrag?(value)
+    }
 }
 
 /// What the singleton lock came to.

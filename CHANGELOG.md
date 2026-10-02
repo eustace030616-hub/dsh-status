@@ -15,6 +15,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
+### Changed
+
+- **The styles are gone; the light is four numbers instead.** There is no style to choose any more. The
+  right-click list holds one slider each for the size of a lens, the gap between the lenses, and how solid
+  a resting and a lit lens are, and the values are remembered. The two styles were the same object
+  differing only in glass, and a pair of presets is a poor way to ask for a size — a slider says what it
+  does.
+- **A slider applies as it is dragged.** Every step re-fits and re-anchors the window, so the light on
+  screen is the preview rather than a change that lands when the list closes.
+- **While the list is open the light drops a level**, below the menu. It outranks a menu on purpose, and
+  with sliders in the list a lens growing across a row would otherwise take the clicks meant for it.
+- **A slider is a small hand-drawn control rather than an `NSSlider`.** The one event a menu is documented
+  to push into a view it hosts is the mouse — `mouseDown:`, `mouseDragged:`, `mouseUp:` — while a stock
+  `NSSlider` pulls its own drags out of the event queue instead. The knob snaps to whole points and whole
+  percents, so it can always reach the value the readout prints.
+
+### Added
+
+- **A migration that keeps the size you had.** The first run after the upgrade reads the old style once,
+  turns it into slider values — `classic` becomes 22 points and an 8 point gap, `nostalgic` 31 and 10 —
+  and forgets the style.
+
+### Fixed
+
+- **The list is placed exactly flush on every border.** `popUp(positioning:at:in:)` lands a menu's top five
+  points above the point it is given, which was measured on menus of two different heights. It used to go
+  unnoticed because the light outranked the list and swallowed the overlap; the placement is now worked out
+  in the list's own top-left corner and converted at the end.
+- **Two adjacent separators are one row of height, not two.** AppKit collapses consecutive separators when
+  it draws but counts both in `menu.size`, which is the number the placement comes from — the reserved
+  group is one separator now, and a bottom-docked light is no longer eleven points off.
+- **`--size POINTS` now does something.** It was parsed and thrown away before, which made it a flag that
+  did nothing; it now sets the lens size for one run, overriding the slider.
+
 ## [0.5.6] - 2026-10-02
 
 ### Fixed
@@ -27,8 +63,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.5.5] - 2026-10-02
 
-## [0.5.5] - 2026-10-02
-
 ### Fixed
 
 - **The right-click list opened a menu-height away from a light docked to the top or bottom edge.**
@@ -37,8 +71,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   list. A side-docked light was unaffected because the two tops line up anyway, which is why it only
   showed horizontally. The list is also clamped inside the visible frame now, so no border can open one
   off the screen.
-
-## [0.5.4] - 2026-10-02
 
 ## [0.5.4] - 2026-10-02
 
@@ -54,8 +86,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.5.3] - 2026-10-02
 
-## [0.5.3] - 2026-10-02
-
 ### Changed
 
 - **Lenses are 20% larger** — 18 to 22 points in the flat style, 26 to 31 in the housing, rounded to whole
@@ -63,8 +93,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   same shape.
 - **Rest is 20% and lit is 80%.** One resting value for both styles, so rest looks the same either way,
   and a lit lens stops short of opaque so it keeps reading as glass.
-
-## [0.5.2] - 2026-10-02
 
 ## [0.5.2] - 2026-10-02
 
