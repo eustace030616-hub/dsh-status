@@ -778,9 +778,13 @@ final class TrafficLightView: NSView {
     private static let rimAlpha: CGFloat = 0.45
 
     /// A slow breath rather than a blink: a session blocked on the user should
-    /// read as alive, not as an alarm. It never goes fully dark.
+    /// read as alive, not as an alarm. It never goes dark — the two ends are
+    /// **alphas**, not fractions of the Lit slider, because what the lens must
+    /// never fall below is a brightness in its own right.
     private static let breathPeriod: Double = 2.17
-    private static let breathFloor: Double = 0.25
+    /// Half solid at the dim end: a faint yellow still reads as a lit lens rather
+    /// than as a lens switching off.
+    private static let breathFloor: Double = 0.5
     /// What a breathing lens peaks at, whatever the Lit slider says.
     ///
     /// Above the slider's default deliberately: at 0.85 against a steady lens of
@@ -813,22 +817,26 @@ final class TrafficLightView: NSView {
         }
     }
 
-    /// Full brightness, except for the yellow lens when it is breathing.
+    /// How far into the breath we are: 0 at the trough, 1 at the crest. A lens
+    /// that is not breathing sits at 1 — full solidity, nothing animating.
     private func level(for lens: Lens) -> Double {
         guard lens == .yellow, needsBreathing else { return 1 }
         let phase = Date().timeIntervalSince(breathEpoch)
             .truncatingRemainder(dividingBy: Self.breathPeriod) / Self.breathPeriod
-        return Self.breathFloor + (1 - Self.breathFloor) * (0.5 + 0.5 * sin(2 * .pi * phase))
+        return 0.5 + 0.5 * sin(2 * .pi * phase)
     }
 
-    /// How solid a lit lens is at this instant: the Lit slider, except that a
-    /// breathing lens peaks at `breathPeak` instead. A slider set brighter than
-    /// that wins — breathing must never be the dimmer of the two.
+    /// The alpha of a lit lens at this instant.
+    ///
+    /// A lens that is not breathing is the Lit slider. A breathing one sweeps
+    /// between `breathFloor` and the brighter of the Lit slider and `breathPeak`:
+    /// a slider set above the peak raises it, and the floor follows only if the
+    /// slider is set below the floor.
     private func solidity(of lens: Lens, level: Double) -> Double {
-        let peak = lens == .yellow && needsBreathing
-            ? max(Double(look.litAlpha), Self.breathPeak)
-            : Double(look.litAlpha)
-        return peak * level
+        guard lens == .yellow, needsBreathing else { return Double(look.litAlpha) }
+        let peak = max(Double(look.litAlpha), Self.breathPeak)
+        let floor = min(Self.breathFloor, peak)
+        return floor + (peak - floor) * level
     }
 
     /// Which lens is lit, if any. Rest is every lens dark, which is what a real

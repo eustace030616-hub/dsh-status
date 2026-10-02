@@ -15,6 +15,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-10-02
+
+### Changed
+
+- **The breath never dips below half solid.** A blocked lens fell to 0.239, barely above the dark lens a light
+  with nothing to say shows, so the trough read as the lens switching off rather than as breathing. The two
+  ends of the breath are now **alphas rather than fractions of the Lit slider** — `breathFloor` 0.5,
+  `breathPeak` 0.95 — because what a lens must never fall below is a brightness in its own right, not a
+  proportion of whatever the slider happens to be set to. A slider above the peak raises the peak with it, and
+  the floor gives way only for a slider set below the floor.
+- Measured on the rendered view: the sweep is now **0.502 → 0.949** over 2.17 s, against 0.239 → 0.949. At
+  Lit = 100% it is 0.502 → 1.000, at Lit = 30% still 0.502 → 0.949, with a resting lens at 0.278.
+
 ## [0.7.9] - 2026-10-02
 
 ### Changed
