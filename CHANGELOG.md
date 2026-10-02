@@ -15,6 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Planned
+
+- **Stage 3 — wiring.** The plugin spawns the renderer and reaps it on dispose. This is the point at
+  which the built binary must be added to the `files` allow-list, or installed copies will break
+  while a source checkout keeps working.
+- Session `title`, currently always `null`: the title exists in the session log, but which accessor
+  exposes it is unconfirmed.
+- A second root agent. `agent/created` overwrites the recorded session, so concurrent root agents
+  would make the published state follow whichever spoke last.
+
+## [0.2.0] - 2026-10-02
+
 ### Changed
 
 - **`idle` replaces `unknown` as the published rest state, and rest is grey rather than red.** The
@@ -74,16 +86,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   delivers that change as a notification on the run loop, so the process kept reporting whatever was
   in front when it started — the acknowledgement would have shipped as a feature that silently did
   nothing. Found by testing against a real application switch; the loop now pumps the run loop.
-
-### Planned
-
-- **Stage 3 — wiring.** The plugin spawns the renderer and reaps it on dispose. This is the point at
-  which the built binary must be added to the `files` allow-list, or installed copies will break
-  while a source checkout keeps working.
-- Session `title`, currently always `null`: the title exists in the session log, but which accessor
-  exposes it is unconfirmed.
-- A second root agent. `agent/created` overwrites the recorded session, so concurrent root agents
-  would make the published state follow whichever spoke last.
 
 ## [0.1.0] - 2026-10-02
 
