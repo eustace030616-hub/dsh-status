@@ -40,6 +40,7 @@ while the other did not exist.
 | `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
 | `meta.sessions` | Every session the publisher is watching: `{ id, state, reason, changedAt }`. The headline `state` above is the most urgent of them, for readers that understand only one. |
+| `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. Never carries a credential. |
 
 **Renderer mapping**
 
@@ -110,6 +111,8 @@ Both keys are optional and validated by hand; any unusable value silently falls 
 | `heartbeatMs` | `2000` | Floor of 250. |
 | `launch` | `true` | Start the renderer shipped in this package, and stop it on dispose. |
 | `lightArgs` | `[]` | Extra renderer arguments — the way a browser-hosted DSH gets its `--open` and `--ack-app`. |
+| `balance` | `true` | Look the account balance up and publish it in `meta.account`. This is the only request the package makes. |
+| `balanceMs` | `300000` | How often. Floor of 60000. Slower than the heartbeat on purpose: an account is charged when a call is made, not second by second. |
 
 ## Install
 
@@ -259,10 +262,32 @@ because the one event a menu is documented to push into a view it hosts is the m
 percents, so it can always reach the number the readout prints. While the list is open the light drops a
 level, below the menu, so a lens growing under a row cannot take the clicks meant for it.
 
-**The account group is empty on purpose.** The shape is what is being settled: the labels and the column a
-balance will fill, with dashes where the figures go and a last row that says so out loud, because a dash
-can be read as a bug. Nothing in it reads anything, and `ValueRow.show(_:)` is where a real number will
-arrive when there is one.
+**The account group is real, and filling it is the plugin's work rather than the renderer's.** The
+publisher makes one authenticated `GET https://api.deepseek.com/user/balance` every `balanceMs` and puts the
+answer in `meta.account`; the renderer draws whatever it finds there — one folded group per currency,
+because the endpoint can answer in more than one, with a footer saying how old the answer is. The renderer
+holds no key and makes no requests, which is why a balance it cannot read is a dim reason rather than a
+number it guessed:
+
+```
+Account ▸
+  CNY ▸                          USD ▸
+    Total      14.58               Total       0.00
+    Granted     0.00               Granted     0.00
+    Topped up  14.58               Topped up   0.00
+  ─────────────
+  updated 4m ago
+```
+
+A failure is a **code, not a message** — `no-key`, `unauthorized`, `offline`, `timeout`, `http-503`,
+`bad-body` — shown as a sentence in that footer, and logged once per change of reason rather than once per
+attempt. DeepSeek's own 401 quotes part of the key it rejected, so a response body is read only when the
+answer was a good one and dropped otherwise; see [Secrets](#secrets).
+
+An account lookup **never touches `state`**. Red stays reserved for a feed that cannot be trusted, so an
+account that cannot be read is a row in a list and never a lens. `is_available: false` — not enough balance
+for API calls — is a row too, for the same reason: the bulbs answer for the agent, not for the account. A
+stale feed is still drawn, because the last figures it was given are worth showing next to how old they are.
 
 There is no highlight on the lenses, and no glass in them: a flat disc with a rim. A white highlight in
 the upper left was tried and asked away — at this size it was the busiest thing on the screen.
@@ -356,15 +381,16 @@ exist) — check `~/Library/Logs/DSH Desktop/harness.log` for a loader warning.
 ## Test
 
 ```bash
-npm test        # or: node test/run.js && node test/cordis.js
+npm test        # or: node test/run.js && node test/balance.js && node test/cordis.js
 ```
 
 Two layers, deliberately separated because they prove different things:
 
 | File | What it proves | What it cannot |
 |---|---|---|
-| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, and that an unwritable path warns once. 16 checks. | Nothing about cordis — it drives a purpose-built stub context. |
-| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, and a bad state path cannot break the mount. 10 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
+| `test/run.js` | The state machine: every transition, both subagent filters, the atomic writer, config fallback, heartbeat, dispose, a mid-turn mount latching its session, that an unwritable path warns once, and the account block: published, carried through a heartbeat, refused without moving the light, and off when switched off. 29 checks. | Nothing about cordis — it drives a purpose-built stub context. |
+| `test/balance.js` | The balance fetcher against every answer the endpoint can give: figures, a refused key, a server error, a dead connection, a timeout, and a body that cannot be read. It also asserts the key never appears in what comes back. 13 checks, no network and no key. | Nothing about the plugin around it — the `fetch` is handed in. |
+| `test/cordis.js` | The plugin **mounts into the real cordis** shipped with the app (`ctx.plugin`), and real `emit` / `waterfall` / `serial` reach the listeners. Critically, that `agent/pre-step` really delegates: cordis vetoes the rest of the chain for any listener that skips `next()`, so the inner fallback running is proof the agent step would not stall. Also: `ctx.effect` disposers run on fiber disposal, and a bad state path cannot break the mount. 11 checks. | No live agent turn drives it. Events are dispatched by hand, with payloads shaped the way `dsh-agent`'s `agentEvents` builds them. |
 
 Both run against real files in a temp directory. Neither needs DSH, a network, or an API key.
 

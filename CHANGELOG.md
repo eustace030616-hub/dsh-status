@@ -15,15 +15,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-02
+
 ### Added
 
-- **A `Secrets` section in the README**, recording how the API key is kept out of this project: the value
-  is resolved at request time through the credential seam and never stored, `describe()` answers "is a key
-  configured?" without a value, error bodies are mapped to codes because the provider's own 401 echoes key
-  fragments, the key never reaches a child process, and the tests inject a canary secret and assert it
-  surfaces nowhere. It also records the rule for working on the code, which is the part that gets
-  forgotten: never print a credential value, describe it by existence, source and length, and rotate one
-  that escapes rather than trying to scrub the transcript.
+- **The account balance is real.** The publisher makes one authenticated
+  `GET https://api.deepseek.com/user/balance` every `balanceMs` (default five minutes, floor of one) and
+  publishes the answer as `meta.account`: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency,
+  total, granted, toppedUp }] }`. Additive inside `meta`, so the contract stays version 1 and a reader that
+  has never heard of an account ignores it.
+- **The `Account` group draws those figures** — one folded group per currency, because the endpoint answers
+  in more than one, with a footer saying how old the answer is and marking it stale after three missed
+  lookups. A present-but-empty block reads as "never fetched"; a publisher with no account block at all
+  still reads as "no source wired up yet".
+- **`test/balance.js`**, 13 checks against every answer the endpoint can give — figures, a refused key, a
+  server error, a dead connection, a timeout, an unreadable body — with the `fetch` handed in, so the suite
+  needs no network and no key. Six more checks in `test/run.js` drive a whole lookup through the plugin with
+  the network, the credential seam and the timers under test control.
+- **A `Secrets` section in the README**, recording how the key is kept out of this project: the value is
+  resolved at request time through the credential seam and never stored, `describe()` answers "is a key
+  configured?" without a value, error bodies are mapped to codes, the key never reaches a child process, and
+  the tests inject a canary secret and assert it surfaces nowhere. It also records the rule for working on
+  the code, which is the part that gets forgotten: never print a credential value, describe one by
+  existence, source and length, and rotate one that escapes rather than trying to scrub the transcript.
+
+### Changed
+
+- **A failure to read the account is a code, never a message.** `no-key`, `unauthorized`, `offline`,
+  `timeout`, `http-503`, `bad-body`: the provider's own 401 quotes part of the key it rejected, so a body is
+  read only when the answer was a good one. One warning per change of reason, not one per attempt.
+- **The lookup cannot reach the state machine.** It is written into `meta` with a targeted write rather than
+  a publish, so the headline, its stamps and the light are left exactly as they were: red stays reserved for
+  a feed that cannot be trusted, and `is_available: false` is a row in the list rather than a lens.
+- **The key is resolved through the credential seam at request time** — `ctx.credentials.resolve(ref)` when
+  the composition has one, the ambient `DEEPSEEK_API_KEY` when it does not — and lives for one request. The
+  seam is deliberately **not** declared in `inject`: a plugin that waits for a service a custom composition
+  lacks would never mount, and a profile that cannot boot is worse than a missing balance.
+- **The state-machine tests no longer spawn renderers or reach the network.** Every mount in `test/run.js`
+  passes `launch: false, balance: false`; before this a suite run left stray lights behind, and would now
+  have made real balance requests with the real key.
 
 ## [0.6.4] - 2026-10-02
 

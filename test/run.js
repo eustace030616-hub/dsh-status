@@ -84,7 +84,7 @@ await check('config: unusable values fall back to the defaults', () => {
 
 const main = makeCtx()
 // A long heartbeat isolates the state-machine assertions from re-stamping.
-apply(main.ctx, { statePath, heartbeatMs: 60000 })
+apply(main.ctx, { statePath, heartbeatMs: 60000, launch: false, balance: false })
 
 await check('init: publishes idle, creates the directory, writes a full document', () => {
   assert.ok(existsSync(statePath), 'state file was not created')
@@ -259,7 +259,7 @@ await check('a subagent ask is charged to its parent session, not to itself', as
 
 const beat = makeCtx()
 const beatPath = join(root, 'beat', 'state.json')
-apply(beat.ctx, { statePath: beatPath, heartbeatMs: 250 })
+apply(beat.ctx, { statePath: beatPath, heartbeatMs: 250, launch: false, balance: false })
 const readBeat = () => JSON.parse(readFileSync(beatPath, 'utf8'))
 
 await check('heartbeat: re-stamps the timestamp without changing the state', async () => {
@@ -278,7 +278,7 @@ await check('heartbeat: re-stamps the timestamp without changing the state', asy
 await check('a mid-turn mount latches the session from turn-stopping alone', async () => {
   const late = makeCtx()
   const latePath = join(root, 'late', 'state.json')
-  apply(late.ctx, { statePath: latePath, heartbeatMs: 60000 })
+  apply(late.ctx, { statePath: latePath, heartbeatMs: 60000, launch: false, balance: false })
   const readLate = () => JSON.parse(readFileSync(latePath, 'utf8'))
   assert.equal(readLate().sessionId, null, 'nothing is known before the first event')
   await fire(late, 'agent/turn-stopping', { agent: ROOT, turn: 1 })
@@ -301,9 +301,209 @@ await check('dispose: clears the timer and publishes a final unknown', () => {
 await check('an unwritable path warns exactly once and never throws', () => {
   const before = warnings.length
   const doomed = makeCtx()
-  apply(doomed.ctx, { statePath: '/dev/null/nope/state.json', heartbeatMs: 60000 })
+  apply(doomed.ctx, { statePath: '/dev/null/nope/state.json', heartbeatMs: 60000, launch: false, balance: false })
   assert.equal(warnings.length - before, 1, `expected 1 warning, got ${warnings.length - before}`)
   assert.match(warnings.at(-1), /dsh-status: cannot write/)
+})
+
+// MARK: the account
+
+/**
+ * Key-shaped on purpose: a canary that could not be mistaken for a key would
+ * prove nothing about whether keys leak.
+ */
+const CANARY = 'sk-canary0000000000000000000000000000'
+
+/** The endpoint's answer, as it arrives on this machine. */
+const BALANCE_BODY = {
+  is_available: true,
+  balance_infos: [
+    { currency: 'CNY', total_balance: '14.58', granted_balance: '0.00', topped_up_balance: '14.58' },
+    { currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }
+  ]
+}
+
+/** The part of a `Response` this code uses. */
+const answerFor = (status, body) => ({
+  status,
+  ok: status >= 200 && status < 300,
+  json: async () => body
+})
+
+/**
+ * Mount a publisher with the network, the credential seam and the timers under
+ * test control. The suite must never reach DeepSeek, never read the real
+ * credential store, and never wait on a real interval.
+ */
+function mountWithBalance({ response, balance = true, credentials = true, ambient = null } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-status-balance-'))
+  const path = join(dir, 'state.json')
+  const calls = []
+  const refs = []
+  const timers = []
+
+  const realFetch = globalThis.fetch
+  const realSetInterval = globalThis.setInterval
+  const realClearInterval = globalThis.clearInterval
+  const realAmbient = process.env.DEEPSEEK_API_KEY
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return typeof response === 'function' ? response(url, options) : response
+  }
+  globalThis.setInterval = (fn, ms) => {
+    const handle = { fn, ms, unref() {} }
+    timers.push(handle)
+    return handle
+  }
+  globalThis.clearInterval = () => {}
+  if (ambient === null) delete process.env.DEEPSEEK_API_KEY
+  else process.env.DEEPSEEK_API_KEY = ambient
+
+  const harness = makeCtx()
+  if (credentials) {
+    harness.ctx.credentials = {
+      resolve: async (ref) => {
+        refs.push(ref)
+        return ref === 'DEEPSEEK_API_KEY' ? { value: CANARY, source: 'store' } : undefined
+      }
+    }
+  }
+
+  apply(harness.ctx, { statePath: path, heartbeatMs: 250, launch: false, balance, balanceMs: 60000 })
+
+  return {
+    path,
+    calls,
+    refs,
+    timers,
+    text: () => readFileSync(path, 'utf8'),
+    read: () => JSON.parse(readFileSync(path, 'utf8')),
+    /** The account's timer, callable on demand so a cadence can be a test. */
+    balanceTimer: () => timers.find((timer) => timer.ms === 60000),
+    restore: () => {
+      globalThis.fetch = realFetch
+      globalThis.setInterval = realSetInterval
+      globalThis.clearInterval = realClearInterval
+      if (realAmbient === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = realAmbient
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+}
+
+await check('balance: the figures are published, and the key is nowhere', async () => {
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
+  try {
+    await sleep(25) // the first lookup is deliberately not awaited
+    const doc = mounted.read()
+
+    assert.equal(mounted.refs[0], 'DEEPSEEK_API_KEY', 'the seam is asked for a reference')
+    assert.equal(mounted.calls[0].url, 'https://api.deepseek.com/user/balance')
+    assert.equal(mounted.calls[0].options.headers.authorization, `Bearer ${CANARY}`)
+
+    assert.equal(doc.meta.account.balances[0].currency, 'CNY')
+    assert.equal(doc.meta.account.balances[0].total, '14.58')
+    assert.equal(doc.meta.account.balances[1].currency, 'USD')
+    assert.equal(doc.meta.account.isAvailable, true)
+    assert.equal(doc.meta.account.intervalMs, 60000)
+    assert.equal(typeof doc.meta.account.fetchedAt, 'number')
+
+    // The account rides in meta, and the state machine never noticed it.
+    assert.equal(doc.state, 'idle')
+    assert.equal(doc.reason, 'init')
+    assert.equal(doc.meta.sessions.length, 0)
+
+    assert.ok(!mounted.text().includes(CANARY), 'the document must not carry the key')
+    assert.ok(!mounted.text().includes('Bearer'), 'not even the scheme')
+    assert.ok(!warnings.join('\n').includes(CANARY), 'nor a log line')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: a refused key is a reason, not a red light', async () => {
+  const refusal = { error: { message: 'Authentication Fails, Your api key: ****nary is invalid' } }
+  const mounted = mountWithBalance({ response: answerFor(401, refusal) })
+  try {
+    await sleep(25)
+    const doc = mounted.read()
+
+    assert.equal(doc.meta.account.reason, 'unauthorized')
+    assert.equal(doc.meta.account.balances, undefined)
+    // The feed is alive and says so: an account lookup is not a turn.
+    assert.equal(doc.state, 'idle')
+    assert.equal(typeof doc.updatedAt, 'number')
+    assert.ok(!mounted.text().includes('nary'), 'no fragment of the key or the body survives')
+    assert.equal(warnings.filter((line) => line.includes('balance')).length, 1)
+
+    // Twice more, and still once: a wrong key is wrong until it is fixed.
+    mounted.balanceTimer().fn()
+    mounted.balanceTimer().fn()
+    await sleep(25)
+    assert.equal(warnings.filter((line) => line.includes('balance')).length, 1)
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: the snapshot survives a heartbeat', async () => {
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
+  try {
+    await sleep(25)
+    const first = mounted.read()
+    // The heartbeat timer is stubbed like every other one, so fire it by hand
+    // rather than waiting: a cadence under test control is a cadence that cannot
+    // make the suite slow or flaky. A millisecond first, so the stamp moves.
+    await sleep(5)
+    mounted.timers.find((timer) => timer.ms === 250).fn()
+    const later = mounted.read()
+
+    assert.ok(later.updatedAt > first.updatedAt, 'the heartbeat re-stamped the document')
+    assert.equal(later.meta.account.fetchedAt, first.meta.account.fetchedAt, 'the figures did not move')
+    assert.equal(later.meta.account.balances[0].total, '14.58')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: switched off means no request and no block', async () => {
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY), balance: false })
+  try {
+    await sleep(25)
+    assert.equal(mounted.calls.length, 0)
+    assert.equal(mounted.read().meta.account, undefined)
+    assert.equal(mounted.timers.length, 1, 'only the heartbeat timer exists')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: the ambient variable is the fallback with no seam', async () => {
+  const mounted = mountWithBalance({
+    response: answerFor(200, BALANCE_BODY),
+    credentials: false,
+    ambient: CANARY
+  })
+  try {
+    await sleep(25)
+    assert.equal(mounted.calls.length, 1, 'the lookup still happened')
+    assert.equal(mounted.calls[0].options.headers.authorization, `Bearer ${CANARY}`)
+    assert.ok(!mounted.text().includes(CANARY))
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: no key at all is a reason, and no request', async () => {
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY), credentials: false })
+  try {
+    await sleep(25)
+    assert.equal(mounted.calls.length, 0, 'an unset key must not reach the network')
+    assert.equal(mounted.read().meta.account.reason, 'no-key')
+  } finally {
+    mounted.restore()
+  }
 })
 
 rmSync(root, { recursive: true, force: true })

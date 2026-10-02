@@ -59,6 +59,32 @@ struct SessionSummary {
     var changedAt: Date?
 }
 
+/// One currency's figures, as the publisher reports them.
+///
+/// Kept as the strings the provider sent: `"14.58"` is the figure a user checks
+/// against their invoice, and a double would render 14.580000000000002.
+struct AccountFigures {
+    var currency: String
+    var total: String
+    var granted: String?
+    var toppedUp: String?
+}
+
+/// The account block, when the publisher sends one.
+///
+/// Every field is optional because there are three things this can be: figures,
+/// a reason there are none, or nothing at all from a publisher that predates it.
+/// None of it reaches the bulbs: the light answers for the agent, not for the
+/// account, so a refused key is a dim row in a list rather than a red lens.
+struct Account {
+    var fetchedAt: Date?
+    var intervalMs: Double?
+    var isAvailable: Bool?
+    /// A code, never the provider's message: that message quotes the key.
+    var reason: String?
+    var figures: [AccountFigures] = []
+}
+
 struct Reading {
     var light: Light
     /// Why this light: the publisher's `reason`, or why we could not trust it.
@@ -78,6 +104,8 @@ struct Reading {
     /// Every session the publisher is watching, when it reports them.
     /// Empty for a publisher that predates the snapshot.
     var sessions: [SessionSummary] = []
+    /// The account, when the publisher reports one. Shown in the list only.
+    var account: Account?
 
     /// The feed is unusable, however readable it was.
     static func broken(_ detail: String) -> Reading {
@@ -135,6 +163,25 @@ enum StateFile {
         let age = now.timeIntervalSince1970 - updatedAtMs / 1000
         let staleAfter = max(staleAfterHeartbeats, staleAfterHeartbeats * heartbeatMs / 1000)
 
+        // Read the meta once, for both the sessions and the account: a stale
+        // feed still carries the last figures it was given, and they are worth
+        // showing next to how old they are.
+        var sessions: [SessionSummary] = []
+        var account: Account?
+        if let meta = object["meta"] as? [String: Any] {
+            if let reported = meta["sessions"] as? [[String: Any]] {
+                sessions = reported.compactMap { item in
+                    guard let id = item["id"] as? String, let state = item["state"] as? String else {
+                        return nil
+                    }
+                    let changedAt = (item["changedAt"] as? NSNumber)
+                        .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+                    return SessionSummary(id: id, state: Light(published: state), changedAt: changedAt)
+                }
+            }
+            account = parseAccount(from: meta["account"])
+        }
+
         if age > staleAfter {
             // A killed DSH must not leave a light on: the heartbeat is gone,
             // so the last state is no longer a claim about right now. The
@@ -144,21 +191,10 @@ enum StateFile {
                 detail: String(format: "stale (heartbeat %.1fs)", heartbeatMs / 1000),
                 sessionId: sessionId,
                 age: age,
-                stale: true
+                stale: true,
+                sessions: sessions,
+                account: account
             )
-        }
-
-        var sessions: [SessionSummary] = []
-        if let meta = object["meta"] as? [String: Any],
-           let reported = meta["sessions"] as? [[String: Any]] {
-            sessions = reported.compactMap { item in
-                guard let id = item["id"] as? String, let state = item["state"] as? String else {
-                    return nil
-                }
-                let changedAt = (item["changedAt"] as? NSNumber)
-                    .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
-                return SessionSummary(id: id, state: Light(published: state), changedAt: changedAt)
-            }
         }
 
         // An unrecognised value is rest, not failure: the feed is healthy and
@@ -171,7 +207,43 @@ enum StateFile {
             age: age,
             publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000),
             changedAt: changedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) },
-            sessions: sessions
+            sessions: sessions,
+            account: account
+        )
+    }
+
+    /// A string field, accepting a number as well: the publisher sends strings,
+    /// and a JSON number would otherwise read as a missing figure.
+    private static func text(_ object: [String: Any], _ key: String) -> String? {
+        if let value = object[key] as? String { return value }
+        if let value = object[key] as? NSNumber { return value.stringValue }
+        return nil
+    }
+
+    /// The account block, read defensively: an unreadable currency is dropped
+    /// rather than failing the whole document, because a feed the user can still
+    /// see the light from must never be thrown away over a figure.
+    private static func parseAccount(from value: Any?) -> Account? {
+        guard let reported = value as? [String: Any] else { return nil }
+        let reported_figures = reported["balances"] as? [[String: Any]] ?? []
+        let figures = reported_figures.compactMap { item -> AccountFigures? in
+            guard let currency = text(item, "currency"), let total = text(item, "total") else {
+                return nil
+            }
+            return AccountFigures(
+                currency: currency,
+                total: total,
+                granted: text(item, "granted"),
+                toppedUp: text(item, "toppedUp")
+            )
+        }
+        return Account(
+            fetchedAt: (reported["fetchedAt"] as? NSNumber)
+                .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) },
+            intervalMs: (reported["intervalMs"] as? NSNumber)?.doubleValue,
+            isAvailable: reported["isAvailable"] as? Bool,
+            reason: reported["reason"] as? String,
+            figures: figures
         )
     }
 }
@@ -900,6 +972,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let finishes = FinishTracker()
     private var look = Look.standard
     private var side: ScreenSide = .right
+    /// The last reading, kept whole so the list can show the account: the view
+    /// only needs the colour, but the account rides in the same document.
+    private var reading: Reading = .broken("starting")
     /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
     /// How solid the grey body behind the lenses is, against the material's own
@@ -1014,11 +1089,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let view else { return }
         acknowledgement?.poll()
         let raw = StateFile.read(at: options.statePath)
-        let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
+        let next = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
+        // Kept whether or not the colour moved: the account can change while the
+        // light stays exactly as it is, and the list is built on demand.
+        reading = next
         // Redraw only when the colour actually changes: the light is idle most
         // of the time, and the reading itself changes every heartbeat tick.
-        if reading.light != view.reading.light {
-            view.reading = reading
+        if next.light != view.reading.light {
+            view.reading = next
         }
     }
 
@@ -1230,26 +1308,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    /// An account list with no account behind it: the shape is what is being
-    /// settled, so the rows carry the labels and the columns a balance will fill
-    /// and the figures themselves are dashes. Nothing here reads anything.
+    /// An account list. The figures come from the publisher's `meta.account`,
+    /// which is the only place they can come from: this process holds no key and
+    /// makes no requests, so a balance it cannot read is a dash and a reason
+    /// rather than a number it guessed.
     ///
-    /// The last row says so out loud. A dash can be read as a bug, and this is
-    /// not one: it is a place a number goes.
+    /// One folded group per currency, because the endpoint answers in more than
+    /// one, and a footer saying how old the answer is — hours-old figures should
+    /// not read like current ones. Nothing here can change a bulb.
     private func accountMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (label, note) in [("Balance", "—"), ("Today", "—"), ("This month", "—")] {
+
+        guard let account = reading.account else {
+            menu.addItem(note("no source wired up yet"))
+            return menu
+        }
+        for figures in account.figures {
+            menu.addItem(folded(figures.currency, currencyMenu(figures)))
+        }
+        if let reason = account.reason {
+            menu.addItem(note(reasonText(reason)))
+        }
+        if account.isAvailable == false {
+            menu.addItem(note("not enough balance for api calls"))
+        }
+        menu.addItem(.separator())
+        menu.addItem(note(freshness(account)))
+        return menu
+    }
+
+    private func currencyMenu(_ figures: AccountFigures) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let rows: [(String, String?)] = [
+            ("Total", figures.total),
+            ("Granted", figures.granted),
+            ("Topped up", figures.toppedUp)
+        ]
+        for (label, value) in rows {
+            guard let value else { continue }
             let item = NSMenuItem()
-            item.view = ValueRow(label: label, value: note)
+            item.view = ValueRow(label: label, value: value)
             item.isEnabled = true
             menu.addItem(item)
         }
-        menu.addItem(.separator())
-        let note = NSMenuItem(title: "no source wired up yet", action: nil, keyEquivalent: "")
-        note.isEnabled = false
-        menu.addItem(note)
         return menu
+    }
+
+    /// A row that is only information: dim, and not clickable.
+    private func note(_ text: String) -> NSMenuItem {
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    /// The publisher's codes in words. It sends codes rather than the provider's
+    /// message, because that message quotes the key it refused.
+    private func reasonText(_ reason: String) -> String {
+        switch reason {
+        case "no-key": return "no api key configured"
+        case "unauthorized": return "deepseek refused the key"
+        case "offline": return "could not reach deepseek"
+        case "timeout": return "deepseek did not answer"
+        case "no-fetch": return "this runtime cannot fetch"
+        case "bad-body": return "unreadable answer"
+        default:
+            return reason.hasPrefix("http-") ? "deepseek error \(reason.dropFirst(5))" : reason
+        }
+    }
+
+    /// How old the figures are, and whether that is too old to trust.
+    private func freshness(_ account: Account) -> String {
+        guard let fetchedAt = account.fetchedAt else { return "never fetched" }
+        let age = max(0, Date().timeIntervalSince(fetchedAt))
+        let when = age < 90 ? "just now" : "\(relative(age)) ago"
+        let interval = (account.intervalMs ?? 300_000) / 1000
+        // Three missed lookups is not a slow network, it is a stopped publisher.
+        return age > interval * 3 ? "updated \(when) — stale" : "updated \(when)"
+    }
+
+    /// "4m", "2h 5m". Short, because it sits in a menu row.
+    private func relative(_ seconds: Double) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        return rest == 0 ? "\(hours)h" : "\(hours)h \(rest)m"
     }
 
     /// A group that is closed until it is opened, which is what a submenu is.
