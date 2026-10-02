@@ -6,10 +6,10 @@ small JSON file; a native macOS dot reads it and shows red / yellow / green abov
 The file is the entire interface between the two halves, which is what let each be built and tested
 while the other did not exist.
 
-- **Stage 1 — the publisher.** `package.json`, `cordis.patch.yml`, `lib/`. Installable from the plugin page.
-- **Stage 2 — the renderer.** `mac/`. `DSHLight.app`, universal and ad-hoc signed.
-- **Stage 3 — the wiring.** Not built: the plugin will spawn and supervise the renderer, and the
-  built binary will then have to join the `files` allow-list.
+- **The publisher.** `lib/` — a DSH plugin, installed from the plugin page.
+- **The renderer.** `mac/` — `DSHLight.app`, universal and ad-hoc signed.
+- **The wiring.** The plugin starts the renderer when it mounts and stops it on dispose. The built
+  bundle ships inside the package (`bin/`), so a plugin-page install needs no clone and no toolchain.
 
 ## The contract
 
@@ -105,6 +105,8 @@ Both keys are optional and validated by hand; any unusable value silently falls 
 |---|---|---|
 | `statePath` | `~/Library/Application Support/dsh-status/state.json` | Must be absolute. |
 | `heartbeatMs` | `2000` | Floor of 250. |
+| `launch` | `true` | Start the renderer shipped in this package, and stop it on dispose. |
+| `lightArgs` | `[]` | Extra renderer arguments — the way a browser-hosted DSH gets its `--open` and `--ack-app`. |
 
 ## Install
 
@@ -123,6 +125,9 @@ Because the package declares `dsh.bundle`, the manager applies its overlay patch
 lands in the profile's `node_modules` and is mounted as a profile layer, so the row's
 `name: 'dsh-status'` resolves as a real package. A package *without* `dsh.bundle` is installed as a
 plain dependency with a warning — that warning is how you can tell auto-mount did not happen.
+
+The renderer ships inside the same package, under `bin/`, and the plugin starts it for you. That is the
+whole install: nothing to clone, nothing to build, nothing to launch.
 
 **Then restart DSH Desktop.** The manager applies config changes live when HMR is available, but a
 packaged Electron host gets only the config-watching subset (`dsh-desktop-hmr-fallback`) — it
@@ -169,9 +174,15 @@ settles to grey once you are back at DSH, because the reminder has been served. 
 move between DSH and where you were**; drag it to reposition, and it remembers where you left it. A
 single click is deliberately inert.
 
+The plugin starts this for you when it mounts and stops it on dispose, so there is nothing to launch
+by hand. Build it only when working on it, and after changing the Swift run `npm run ship` to refresh
+the committed bundle in `bin/` — that copy is what an install actually runs. `npm test` fails if you
+forget, because the shipped binary records the digest of the source it came from.
+
 ```bash
 ./mac/build.sh              # universal binary, ad-hoc signed, into ./build
-open build/DSHLight.app     # draw it
+npm run ship                # build, and refresh the bundle that ships in bin/
+open build/DSHLight.app     # draw it by hand
 pkill -f DSHLight           # stop it
 ```
 

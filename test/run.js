@@ -6,6 +6,7 @@
  * Run with `npm test` (or `node test/run.js`).
  */
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -60,6 +61,17 @@ const statePath = join(root, 'nested', 'state.json')
 const read = () => JSON.parse(readFileSync(statePath, 'utf8'))
 
 console.log('dsh-status — stage 1\n')
+
+await check('the shipped renderer was built from the Swift source beside it', () => {
+  const source = readFileSync(new URL('../mac/Sources/DSHLight.swift', import.meta.url))
+  const digest = createHash('sha256').update(source).digest('hex')
+  const recorded = readFileSync(new URL('../bin/SOURCE-SHA256', import.meta.url), 'utf8').trim()
+  assert.equal(recorded, digest, 'bin/ is stale — run scripts/ship.sh')
+  assert.ok(
+    existsSync(new URL('../bin/DSHLight.app/Contents/MacOS/DSHLight', import.meta.url)),
+    'the shipped bundle has no executable'
+  )
+})
 
 await check('config: unusable values fall back to the defaults', () => {
   assert.equal(resolveConfig(undefined).statePath, DEFAULTS.statePath)

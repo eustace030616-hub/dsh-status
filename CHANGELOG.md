@@ -15,8 +15,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-02
+
+### Added
+
+
 ### Changed
 
+- **The renderer ships inside the plugin, and the plugin runs it.** `bin/` carries the built universal
+  bundle, so a plugin-page install is the whole light: no clone, no Xcode, no build step and no
+  hand-launching. The plugin starts it once the first state is published — so the dot never has to draw
+  a missing file — stops it on dispose, and leaves it alone on any platform that is not macOS. Setting
+  `launch: false` opts out, and `lightArgs` passes renderer arguments through, which is how a
+  browser-hosted DSH gets its `--open` and `--ack-app`.
+- **One light only.** The renderer takes an exclusive `flock` for the life of its process, so the
+  plugin's instance and a hand-launched one cannot both draw. The kernel releases it on exit, so a crash
+  cannot strand the lock — which is why it is a lock and not a pid file.
+- **A drift guard for the committed bundle.** The binary records the digest of the Swift source it was
+  built from and `npm test` compares the two, so editing the renderer without running `npm run ship`
+  fails the suite rather than shipping a stale dot.
 - **Being in DSH acknowledges, not just arriving.** Green settled only when DSH *became* frontmost, so a
   turn finishing while the user was already looking at DSH stayed green until they left and came back —
   and the only way to clear it was to click. Looking at DSH is having read it: the acknowledgement now

@@ -13,6 +13,7 @@
  * file, so the renderer cannot disturb the publisher.
  */
 import Cocoa
+import Darwin
 
 // MARK: - The contract
 
@@ -753,7 +754,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// An advisory lock held for the life of the process.
+///
+/// One light only: the plugin launches one on every boot, and a hand-launched
+/// one would otherwise draw a second dot over the first. `flock` is released by
+/// the kernel when the process dies, so a crash cannot strand the lock — which
+/// is why it is used instead of a pid file or a distributed lock.
+private func acquireSingletonLock() -> Int32? {
+    let directory = ("~/Library/Application Support/dsh-status" as NSString).expandingTildeInPath
+    try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    let path = (directory as NSString).appendingPathComponent("light.lock")
+    let descriptor = open(path, O_CREAT | O_RDWR, 0o644)
+    guard descriptor >= 0 else { return nil }
+    if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+        close(descriptor)
+        return nil
+    }
+    return descriptor
+}
+
 func runWindowMode(_ options: Options) {
+    guard let lock = acquireSingletonLock() else {
+        FileHandle.standardError.write("DSHLight: another light is already running\n".data(using: .utf8)!)
+        exit(0)
+    }
+    // Held until the process ends; never closed on purpose.
+    _ = lock
+
     let application = NSApplication.shared
     let delegate = AppDelegate(options: options)
     application.delegate = delegate
