@@ -88,6 +88,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **Every gesture cost one extra click.** AppKit uses the first click on an inactive window *only* to
+  activate it and never delivers it, so a single click needed two and a double-click needed three. The
+  view now accepts the first click, and the dot draws a ring while a first click waits for its partner:
+  a two-click gesture with no feedback is indistinguishable from a dead one, which is how this stayed
+  invisible.
+- **The light could never send the user back.** The direction was decided by asking which application
+  was in front *at the instant of the click* — by which time the click had made the light's own process
+  frontmost, so the answer was never DSH and a return click always went forward instead. The direction
+  now comes from the last observed real application, and the light never records itself.
 - **An acknowledgement expired one heartbeat after it was made.** `updatedAt` means "last heard from"
   — the heartbeat moves it every couple of seconds — and the renderer compared an acknowledgement
   against it as though it meant "when the state changed". Green therefore settled to grey and sprang

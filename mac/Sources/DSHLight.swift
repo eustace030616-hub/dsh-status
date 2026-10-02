@@ -184,6 +184,8 @@ final class Acknowledgement {
     private let targets: Set<String>
     private var previousFrontmost: String?
     private(set) var at: Date?
+    /// The last application seen in front that was neither DSH nor the light.
+    private var lastObservedFrontmost: String?
     /// The last application the user was in that was not DSH. Restoring the
     /// application is as far as public API reaches — macOS will not let one
     /// application select another's window or browser tab — but it is what
@@ -215,6 +217,13 @@ final class Acknowledgement {
         let identifier = front?.bundleIdentifier
         defer { previousFrontmost = identifier }
 
+        // Our own application is never recorded: clicking the light can make it
+        // frontmost, and that must not be mistaken for "the user is looking at
+        // DSH" — or for somewhere to return to.
+        if let identifier, identifier != Bundle.main.bundleIdentifier {
+            lastObservedFrontmost = identifier
+        }
+
         // Remember where the user was. Neither DSH nor the light itself is ever
         // remembered: returning to either would be a no-op, and the light *does*
         // briefly become frontmost when it is launched, which is enough to make
@@ -231,12 +240,15 @@ final class Acknowledgement {
         return true
     }
 
-    /// Whether the user is looking at DSH right now.
+    /// Whether the last *real* application in front was DSH.
+    ///
+    /// Deliberately the last observation rather than a fresh read. Clicking the
+    /// light can make its own process frontmost, and asking "who is in front
+    /// now" at that moment answers "the light" — which turned every return click
+    /// into a forward one, so the light could never send the user back.
     var isLookingAtTarget: Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
-        }
-        return targets.contains(front)
+        guard let observed = lastObservedFrontmost else { return false }
+        return targets.contains(observed)
     }
 
     /// Put the user back in the application they were in before DSH.
@@ -478,6 +490,10 @@ final class DotView: NSView {
     /// Read on mouse-down, which is where AppKit sets it reliably. The gesture
     /// is two clicks on purpose: one stray click must not move the user.
     private var clicksAtMouseDown = 1
+    /// When the first of the two clicks landed. A two-click gesture with no
+    /// feedback is indistinguishable from a dead one, which is how the
+    /// swallowed-click bug stayed invisible for so long.
+    private var pendingUntil: Date?
 
     private func colour(for light: Light) -> NSColor {
         switch light {
@@ -503,7 +519,21 @@ final class DotView: NSView {
         let edge = NSBezierPath(ovalIn: dot)
         edge.lineWidth = 1
         edge.stroke()
+
+        if let until = pendingUntil, Date() < until {
+            // A ring while a first click waits for its partner.
+            NSColor.white.withAlphaComponent(0.95).setStroke()
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 2.5, dy: 2.5))
+            ring.lineWidth = 2
+            ring.stroke()
+        }
     }
+
+    /// AppKit uses the first click on an inactive window *only* to activate it
+    /// and never delivers it, which cost every gesture exactly one extra click:
+    /// a single click needed two, and a double-click needed three. This is the
+    /// documented override that delivers it.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     // Manual drag so that a click and a drag can share one small target.
     override func mouseDown(with event: NSEvent) {
@@ -532,7 +562,16 @@ final class DotView: NSView {
         } else if clicksAtMouseDown >= 2 {
             // Only the second click acts. A single click is inert, so a stray
             // one while working elsewhere cannot take the screen away.
+            pendingUntil = nil
+            needsDisplay = true
             onTap?()
+        } else {
+            // First click: show that it arrived, then forget it.
+            pendingUntil = Date().addingTimeInterval(0.7)
+            needsDisplay = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+                self?.needsDisplay = true
+            }
         }
     }
 }

@@ -190,8 +190,9 @@ Three properties worth keeping:
 - **The gesture is a double-click, and it only navigates.** Whatever colour is showing, it switches
   between DSH and the application you came from — forward when DSH is not in front, back when it is.
   The colour answers *"should I go?"*; the click does the going, so you never have to read the light to
-  know what a click will do. A single click is inert, so a stray one cannot move you, and when there is
-  nowhere to return to it says so rather than silently doing nothing.
+  know what a click will do. A single click is inert — it only draws a ring, so the gesture is visible
+  while it waits for its partner — and when there is nowhere to return to it says so rather than
+  silently doing nothing.
 - **Arriving is what acknowledges.** A finish settles when DSH comes to the front, because the watcher
   sees that happen — so the click needs to know nothing about state, and a reminder cannot be left
   hanging by a gesture that forgot to clear it.
