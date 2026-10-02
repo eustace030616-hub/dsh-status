@@ -79,9 +79,31 @@ Both keys are optional and validated by hand; any unusable value silently falls 
 
 ## Install
 
-The package declares `dsh.bundle`, so a market/CLI install activates the layer automatically with no
-hand-edited YAML. Until it is published, mount it by path with the bundled script — it backs the patch
-file up first, refuses to run twice, and parses the result:
+### Preferred — the plugin page
+
+Add the repository in DSH's plugin page (sidebar → **Plugins**). No clone, no YAML:
+
+```
+github:eustace030616-hub/dsh-status
+```
+
+`https://github.com/eustace030616-hub/dsh-status` works too. The manager normalises `github:` /
+`gist:` / `git+` prefixes and pre-checks a github.com address with `git ls-remote` before pnpm runs.
+
+Because the package declares `dsh.bundle`, the manager applies its overlay patch itself: the plugin
+lands in the profile's `node_modules` and is mounted as a profile layer, so the row's
+`name: 'dsh-status'` resolves as a real package. A package *without* `dsh.bundle` is installed as a
+plain dependency with a warning — that warning is how you can tell auto-mount did not happen.
+
+**Then restart DSH Desktop.** The manager applies config changes live when HMR is available, but a
+packaged Electron host gets only the config-watching subset (`dsh-desktop-hmr-fallback`) — it
+explicitly does not reproduce module-level hot replacement, so a newly installed module needs a boot.
+The restart also ends the session you are in.
+
+### Fallback — clone and mount by path
+
+For running the tests, iterating on the code, or when the git install is unavailable. The script backs
+the patch file up first, refuses to run twice, and parses the result:
 
 ```bash
 git clone https://github.com/eustace030616-hub/dsh-status.git ~/dsh-status
@@ -100,19 +122,10 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 
 `--print` shows the row without touching anything; `--uninstall` restores the newest backup.
 
-> **Restart DSH Desktop after installing.** The desktop app does watch the user patch layer
-> (`dsh-desktop-hmr-fallback` re-applies it on change, 100 ms debounce), but module-level hot
-> replacement is *not* available in a packaged Electron host — only the config watching is. So a row
-> may well appear without a restart, while a reloaded module will not; treat a restart as the
-> reliable path. It also terminates the session you are in, so install at the end of one.
->
-> This mount row is the one part not yet exercised in a live profile. If the loader will not resolve
-> a path-valued `name`, install through the CLI instead so the package lands in the profile's
-> `node_modules` and the row can use the bare name `dsh-status`:
->
-> ```bash
-> npx @deepseek-ai/dsh plugin --profile web add file:/path/to/dsh-status
-> ```
+> The plugin page is the path to prefer, and the path-valued `name` above is the one link not yet
+> exercised in a live profile. This route also installs only what `files` names, so `scripts/` and
+> `test/` exist in a clone but not in a package install — which is intended: the install script edits
+> the profile patch layer by hand, and the plugin page does that properly.
 >
 > Keep the plugin dependency-free. A `link:` install does **not** install the linked package's own
 > dependencies, and a resolution failure inside a plugin can stop every profile from booting — that
