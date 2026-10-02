@@ -15,6 +15,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-02
+
+### Fixed
+
+- **The balance lookup asked for the credential the wrong way, and so always found none.** `ctx.credentials`
+  reaches only services a plugin has *declared* in `inject`, and this one deliberately declares none — so
+  0.7.0 published `reason: "no-key"` against a store that had the key. cordis's `ctx.get("credentials")` is
+  the read that does not require the injection, and it answers `undefined` when a composition mounts no such
+  service, which is what keeps this plugin mounting anywhere. It is also what the shipped `llm-pi-ai`
+  provider uses to reach the same seam; the flat context of a unit test exposes the property as well, which
+  is why the mistake only showed up in the harness's forked plugin scope.
+- Verified against the real store through a real cordis context before shipping: `describe` reports
+  `{ configured: true, source: "file" }`, and the value itself never entered the check's output. Three new
+  checks in `test/run.js` cover the shapes of a context — a service reached through `ctx.get`, one handed
+  over as a property, and one whose lookup throws.
+
 ## [0.7.0] - 2026-10-02
 
 ### Added

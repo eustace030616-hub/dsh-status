@@ -399,8 +399,10 @@ Both run against real files in a temp directory. Neither needs DSH, a network, o
 This project never handles the API key. The plugin knows the **name** `DEEPSEEK_API_KEY` and nothing else:
 
 - **The value is resolved at request time**, through the harness's credential seam —
-  `await ctx.credentials.resolve('DEEPSEEK_API_KEY')` — and lives in one local for the length of one
-  request. Nothing stores it, and a rotated key reaches the next request with no restart.
+  `await ctx.get('credentials').resolve('DEEPSEEK_API_KEY')` — and lives in one local for the length of one
+  request. Nothing stores it, and a rotated key reaches the next request with no restart. `ctx.get` and not
+  `ctx.credentials`: property access reaches only services a plugin has *declared*, and this one declares
+  none, on purpose (see below).
 - **Existence is asked with `describe()`**, which reports `{configured, source}` and by design never
   returns the value. Any surface that only needs to know *whether* a key is set uses that one.
 - **The published document is plain JSON on disk.** Numbers go in it; the key never does. The renderer is

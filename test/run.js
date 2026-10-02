@@ -361,12 +361,20 @@ function mountWithBalance({ response, balance = true, credentials = true, ambien
   else process.env.DEEPSEEK_API_KEY = ambient
 
   const harness = makeCtx()
-  if (credentials) {
-    harness.ctx.credentials = {
-      resolve: async (ref) => {
-        refs.push(ref)
-        return ref === 'DEEPSEEK_API_KEY' ? { value: CANARY, source: 'store' } : undefined
-      }
+  const seam = {
+    resolve: async (ref) => {
+      refs.push(ref)
+      return ref === 'DEEPSEEK_API_KEY' ? { value: CANARY, source: 'store' } : undefined
+    }
+  }
+  // `ctx.get` is how cordis reaches a service without the inject requirement,
+  // and it is the path the harness actually takes. `'property'` covers the other
+  // shape so a context that hands the service over directly keeps working.
+  if (credentials === true) harness.ctx.get = (name) => (name === 'credentials' ? seam : undefined)
+  else if (credentials === 'property') harness.ctx.credentials = seam
+  else if (credentials === 'throwing') {
+    harness.ctx.get = () => {
+      throw new Error('no such service')
     }
   }
 
@@ -495,7 +503,54 @@ await check('balance: the ambient variable is the fallback with no seam', async 
   }
 })
 
-await check('balance: no key at all is a reason, and no request', async () => {
+await check('balance: the service is read without the inject requirement', async () => {
+  // cordis answers `undefined` from `ctx.get` when the composition mounts no
+  // such service, which is what lets this plugin ask for one without declaring a
+  // dependency it would then wait for — and a plugin that waits never mounts.
+  // The first version asked `ctx.credentials`, which reaches only *injected*
+  // services, and reported "no api key configured" against a store that had one.
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
+  try {
+    await sleep(25)
+    assert.equal(mounted.refs[0], 'DEEPSEEK_API_KEY')
+    assert.equal(mounted.calls.length, 1)
+    assert.equal(mounted.read().meta.account.balances[0].total, '14.58')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: a service handed over directly also works', async () => {
+  const mounted = mountWithBalance({
+    response: answerFor(200, BALANCE_BODY),
+    credentials: 'property'
+  })
+  try {
+    await sleep(25)
+    assert.equal(mounted.calls.length, 1)
+    assert.equal(mounted.read().meta.account.balances[0].total, '14.58')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: a lookup that throws is a reason, not a crash', async () => {
+  const mounted = mountWithBalance({
+    response: answerFor(200, BALANCE_BODY),
+    credentials: 'throwing'
+  })
+  try {
+    await sleep(25)
+    assert.equal(mounted.calls.length, 0, 'nothing was reachable to ask')
+    const doc = mounted.read()
+    assert.equal(doc.meta.account.reason, 'no-key')
+    assert.equal(doc.state, 'idle', 'and the light is untouched')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: a composition with no credential service is a reason, not a failure', async () => {
   const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY), credentials: false })
   try {
     await sleep(25)
