@@ -15,6 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-02
+
+### Changed
+
+- **The light sits on the menu's own material.** It floats on `NSVisualEffectView` with the `menu`
+  material, so the right-click list matches it exactly rather than approximately — the list reads as an
+  extension of the light instead of a separate object. It also gives the light a faint grey body on any
+  wallpaper and follows light and dark appearance without a colour of its own.
+- **The dark body is gone from the nostalgic style**, because the shared backdrop took its place. The
+  style now differs in the lenses — a highlight and a heavier rim — rather than in the housing they sit
+  in, so both styles are the same object with different glass.
+
+## [0.5.3] - 2026-10-02
+
 ## [0.5.3] - 2026-10-02
 
 ### Changed

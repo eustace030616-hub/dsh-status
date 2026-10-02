@@ -590,15 +590,17 @@ struct LightGeometry {
     var lens: CGFloat
     var gap: CGFloat
     var padding: CGFloat
-    var housing: Bool
+    /// Whether the lenses get the glass treatment: a highlight and a heavier
+    /// rim. The backdrop itself is shared, so both styles sit on the same panel.
+    var glassy: Bool
 
     static func of(_ style: LightStyle) -> LightGeometry {
         switch style {
         // Lenses are 20% larger than they began: 18 -> 22 and 26 -> 31, rounded
         // to whole points so the circles stay crisp. The gaps are unchanged, so
-        // the light reads as chunkier bulbs in the same housing.
-        case .classic: return LightGeometry(lens: 22, gap: 8, padding: 8, housing: false)
-        case .nostalgic: return LightGeometry(lens: 31, gap: 10, padding: 10, housing: true)
+        // the light reads as chunkier bulbs in the same shape.
+        case .classic: return LightGeometry(lens: 22, gap: 8, padding: 8, glassy: false)
+        case .nostalgic: return LightGeometry(lens: 31, gap: 10, padding: 10, glassy: true)
         }
     }
 
@@ -748,22 +750,9 @@ final class TrafficLightView: NSView {
         let geometry = LightGeometry.of(style)
         let lit = litLens()
 
-        if geometry.housing {
-            let body = NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 1, dy: 1),
-                xRadius: min(bounds.width, bounds.height) / 3,
-                yRadius: min(bounds.width, bounds.height) / 3
-            )
-            NSColor(calibratedWhite: 0.13, alpha: 0.92).setFill()
-            body.fill()
-            NSColor.black.withAlphaComponent(0.35).setStroke()
-            body.lineWidth = 1
-            body.stroke()
-        }
-
         for (lens, rect) in lensRects() {
             let isLit = lens == lit
-            draw(lens: lens, in: rect, lit: isLit, level: isLit ? level(for: lens) : 0, housing: geometry.housing)
+            draw(lens: lens, in: rect, lit: isLit, level: isLit ? level(for: lens) : 0, glassy: geometry.glassy)
         }
 
         if let until = pendingUntil, Date() < until {
@@ -778,7 +767,7 @@ final class TrafficLightView: NSView {
         }
     }
 
-    private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, housing: Bool) {
+    private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, glassy: Bool) {
         let colour = colour(of: lens)
         if lit {
             // Twenty percent down from opaque: a lit lens still reads as glass
@@ -792,7 +781,7 @@ final class TrafficLightView: NSView {
         }
         NSBezierPath(ovalIn: rect).fill()
 
-        if housing {
+        if glassy {
             // The beginnings of a glass read: a highlight in the upper left,
             // brighter when the lens is lit. The texture is refined later.
             let shine = NSRect(
@@ -805,7 +794,7 @@ final class TrafficLightView: NSView {
             NSBezierPath(ovalIn: shine).fill()
         }
 
-        NSColor.black.withAlphaComponent(housing ? 0.45 : 0.22).setStroke()
+        NSColor.black.withAlphaComponent(glassy ? 0.45 : 0.22).setStroke()
         let rim = NSBezierPath(ovalIn: rect)
         rim.lineWidth = 1
         rim.stroke()
@@ -908,13 +897,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = false
 
+        // The backdrop is the same material a menu uses, so the right-click list
+        // reads as an extension of the light instead of a separate object. It
+        // also gives the light a faint grey body on any wallpaper, and follows
+        // light and dark appearance on its own.
+        let backdrop = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        backdrop.material = .menu
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .active
+        backdrop.wantsLayer = true
+        backdrop.layer?.cornerRadius = min(14, size.height * 0.32)
+        backdrop.layer?.masksToBounds = true
+
         let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
+        view.autoresizingMask = [.width, .height]
         view.style = style
         view.orientation = border.orientation
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
-        window.contentView = view
+        backdrop.addSubview(view)
+        window.contentView = backdrop
 
         window.setFrameOrigin(restoredOrigin(size: size))
         window.orderFrontRegardless()

@@ -203,6 +203,10 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
 | `--size POINTS` | dot diameter, default `24` |
 
+The light sits on the **same material a menu uses**, so the right-click list reads as an extension of it
+rather than a separate object. That also gives it a faint grey body on any wallpaper, and it follows light
+and dark appearance on its own.
+
 The light **docks to whichever screen border is nearest** when dropped, and remembers which one. That
 border also decides the shape: lenses stack on a side edge and lie in a row along a top or bottom one, so
 the light always grows *along* the border rather than across it. The right-click list opens flush to the
