@@ -211,11 +211,18 @@ border also decides the shape: lenses stack on a side edge and lie in a row alon
 the light always grows *along* the border rather than across it. The right-click list opens flush to the
 same border, hanging inward, so an edge-docked light never opens a menu off the edge of the screen.
 
-**The menu bar is always reserved**, even when the system reports it as hidden. With "automatically hide
-and show the menu bar" on, `visibleFrame` covers the whole screen — 1680×1050 against a 1680×1050 frame
-here — so a light docked to the top edge used to sit inside the bar's strip with the bar dropping onto
-it. `NSStatusBar.thickness` says how much to hold back, and the light now sits clear of it whether the
-bar is showing or not.
+**A top-docked light hugs the edge and rides the menu bar.** The bar's height used to be reserved
+whatever the bar was doing, which parked the light 34 points down even with the bar hidden. The bar is
+measured now and the light follows it: 6 points below the screen edge while the bar is away, 6 points
+below the bar while it is down, and back up when it goes.
+
+That measurement cannot come from `visibleFrame`. With "automatically hide and show the menu bar" on it
+reports the whole screen in *both* states — 1680×1050 against a 1680×1050 frame here, bar up or bar down.
+It comes from the bar's own window instead: layer 24, as wide as the screen, bounds measured down from the
+top of the main display, and capped at `NSStatusBar.thickness` so the eight points of blur the window
+carries past the bar can never inflate the answer. The state-file tick notices the bar move; a 60 Hz loop
+rides the slide rather than arriving after it. A light docked to any other border keeps the position you
+gave it, and is only pushed clear if the bar would otherwise be drawn over it.
 
 
 **A drop near a corner keeps the direction it already had.** Around a corner the nearest border is a coin

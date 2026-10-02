@@ -15,6 +15,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-02
+
+### Changed
+
+- **A top-docked light hugs the screen edge and rides the menu bar.** The bar's height used to be reserved
+  unconditionally, which parked the light 34 points down even with the bar hidden. The bar is measured now
+  and the light follows it: 6 points below the screen edge while the bar is away, 6 points below the bar
+  while it is down, and back up when it goes. The top gap is 6 points; the side and bottom gaps are
+  unchanged at 10.
+- **The light follows the slide rather than arriving after it.** The state-file tick notices the bar move
+  and a 60 Hz loop rides it until it stops. A light on any other border keeps the position it was given
+  and is only pushed clear if the bar would otherwise be drawn over it.
+
+### Fixed
+
+- **The bar is measured instead of assumed.** `NSScreen.visibleFrame` cannot answer this: with
+  "automatically hide and show the menu bar" on it reports the whole screen in *both* states — 1680×1050
+  against a 1680×1050 frame, bar up or bar down. The bar is its own window: layer 24, as wide as the
+  screen, with bounds measured down from the top of the main display, so a bar that is out of the way sits
+  at a negative y and the part that has come down is `y + height` from the screen's edge.
+- **The reserved height is capped at `NSStatusBar.thickness`, which is 22, not the 24 this build had
+  assumed.** The bar's window is taller than the bar — 30 against 22, eight points of blur hanging past
+  it — and capping makes the answer independent of how that blur is laid out, and equal to what a system
+  that shows the bar permanently reserves.
+
 ## [0.6.0] - 2026-10-02
 
 ### Changed

@@ -557,6 +557,50 @@ func runPrintMode(_ options: Options) {
 
 // MARK: - Window mode
 
+// MARK: The menu bar as the system reports it
+
+/// How much of `screen`'s top edge a menu bar occupies, read out of a window
+/// list.
+///
+/// Kept apart from the query below because this is the part with the arithmetic
+/// in it, and the part worth being able to read on its own: the bar is the
+/// window at layer 24 that is as wide as the screen, its bounds are measured
+/// **down** from the top of the main display, and the piece of it below that
+/// screen's top edge is what has to be reserved. `mainTop` is the main display's
+/// height, which is what turns this screen's Cocoa frame into those coordinates.
+///
+/// The cap is what makes the answer boring in the ways that matter. The bar's
+/// window is taller than the bar — around eight points of blur that hang past
+/// it, measured at 30 against `NSStatusBar.thickness` of 22 — and that blur
+/// lands differently depending on which end of the window it is on. Capping at
+/// the bar's own height means the answer is the bar, however the window is
+/// built, and it agrees with a system that reserves the bar permanently.
+func menuBarOccupiedHeight(in windows: [[String: Any]], on screen: NSScreen, mainTop: CGFloat) -> CGFloat {
+    let edge = mainTop - screen.frame.maxY
+    var occupied: CGFloat = 0
+    for window in windows {
+        guard (window[kCGWindowLayer as String] as? Int) == 24,
+              let box = window[kCGWindowBounds as String] as? [String: Any],
+              let x = box["X"] as? Double, let y = box["Y"] as? Double,
+              let width = box["Width"] as? Double, let height = box["Height"] as? Double,
+              width > 200,
+              CGFloat(x) < screen.frame.maxX, CGFloat(x + width) > screen.frame.minX
+        else { continue }
+        occupied = max(occupied, CGFloat(y + height) - edge)
+    }
+    return min(max(occupied, 0), NSStatusBar.system.thickness)
+}
+
+/// The same, asked of the system: the menu bar windows that are on screen now,
+/// for the screen the light is on.
+func menuBarHeight(on screen: NSScreen) -> CGFloat {
+    let mainTop = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+    let windows = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+    ) as? [[String: Any]] ?? []
+    return menuBarOccupiedHeight(in: windows, on: screen, mainTop: mainTop)
+}
+
 
 // MARK: - Appearance
 
@@ -928,8 +972,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let finishes = FinishTracker()
     private var look = Look.standard
     private var border: ScreenBorder = .right
+    /// How much of the top edge the menu bar is occupying right now, in points:
+    /// zero when it is out of the way and the bar's thickness when it is down.
+    private var menuBarReserved: CGFloat = 0
+    /// A timer that runs only while the bar is moving, so the light follows it.
+    private var settling: Timer?
     /// How far the light sits from the border it is docked to.
     private static let dockInset: CGFloat = 10
+    /// The same, along the top edge, where the light hugs rather than floats:
+    /// with the bar out of the way it should read as sitting *on* the screen
+    /// edge, not near it.
+    private static let topInset: CGFloat = 6
+    /// The bar slides in a fraction of a second. Watching it at the speed of the
+    /// state file would put the light at the bar's old position and leave it
+    /// there; these are the cadence and the patience of the follow-along.
+    private static let settlingInterval = 1.0 / 60.0
+    private static let settlingPatience = 0.9
+    private static let barStep: CGFloat = 0.5
     /// How close two borders have to be before a drop counts as a corner.
     /// Around one the nearest border is a coin toss, and a change of direction
     /// there resizes the light — which is how it ended up half off the screen.
@@ -1011,6 +1070,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
         self.view = view
         self.backdrop = backdrop
+        // Measure the bar before the first dock, so the light starts where the
+        // bar actually is rather than where it was last time.
+        menuBarReserved = screen(of: window).map { menuBarHeight(on: $0) } ?? 0
         dock()
 
         refresh()
@@ -1021,8 +1083,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.timer = timer
     }
 
+    /// The screen the light is on, which is the one whose menu bar matters.
+    private func screen(of window: NSWindow) -> NSScreen? {
+        window.screen ?? NSScreen.main
+    }
+
     private func refresh() {
         guard let view else { return }
+        syncMenuBar()
         acknowledgement?.poll()
         let raw = StateFile.read(at: options.statePath)
         let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
@@ -1074,16 +1142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.setFrame(frame, display: true)
         }
 
-        var origin = window.frame.origin
-        switch border {
-        case .left: origin.x = visible.minX + Self.dockInset
-        case .right: origin.x = visible.maxX - want.width - Self.dockInset
-        case .top: origin.y = visible.maxY - want.height - Self.dockInset
-        case .bottom: origin.y = visible.minY + Self.dockInset
-        }
-        // A last guarantee that no shape change can park the light off-screen.
-        origin.x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - want.width))
-        origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - want.height))
+        let origin = dockedOrigin(size: want, border: border, in: visible, from: window.frame.origin)
         window.setFrameOrigin(origin)
 
         // The rounded body has to follow the size the sliders give it: a radius
@@ -1097,22 +1156,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
     }
 
-    /// Where a window may sit on a screen: its visible frame, with the menu bar
-    /// reserved even when the system reports it as hidden.
+    /// Where the light sits for a border, given where it is now.
     ///
-    /// With "automatically hide and show the menu bar" on, `visibleFrame` covers
-    /// the whole screen — measured here as 1680x1050 against a 1680x1050 screen
-    /// frame — so a light docked to the top edge sat inside the bar's strip and
-    /// the bar dropped on top of it. `NSStatusBar.thickness` is the bar's height
-    /// and the only public way to ask for it.
+    /// Split out of `dock()` because the menu bar moves the light without the
+    /// user having moved it: the bar slides in and out several times a second,
+    /// and each of those steps has to re-place the light without writing a new
+    /// "remembered position" sixty times a second.
+    private func dockedOrigin(size want: NSSize, border: ScreenBorder, in visible: NSRect, from current: NSPoint) -> NSPoint {
+        var origin = current
+        switch border {
+        case .left: origin.x = visible.minX + Self.dockInset
+        case .right: origin.x = visible.maxX - want.width - Self.dockInset
+        case .top: origin.y = visible.maxY - want.height - Self.topInset
+        case .bottom: origin.y = visible.minY + Self.dockInset
+        }
+        // A last guarantee that no shape change can park the light off-screen,
+        // and that no border can leave it under the menu bar: a side-docked
+        // light sitting high on the screen is pushed down out of the bar's strip
+        // rather than being drawn underneath it.
+        origin.x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - want.width))
+        origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - want.height))
+        return origin
+    }
+
+    /// Where a window may sit on a screen: its visible frame, less whatever the
+    /// menu bar is occupying at this moment.
+    ///
+    /// `visibleFrame` cannot answer that on its own. With "automatically hide and
+    /// show the menu bar" on it reports the whole screen in *both* states —
+    /// measured as 1680x1050 against a 1680x1050 frame with the bar up and with
+    /// it down — so the bar has to be measured, and it is measured in
+    /// `menuBarHeight(on:)`. All this does is take the answer, and still respect
+    /// a system that reserves the bar for us.
     private func usableFrame(of screen: NSScreen) -> NSRect {
         var frame = screen.visibleFrame
-        let menuBar = max(NSStatusBar.system.thickness, 24)
+        let menuBar = max(menuBarReserved, screen.frame.maxY - frame.maxY)
         let alreadyReserved = screen.frame.maxY - frame.maxY
         if alreadyReserved < menuBar {
             frame.size.height = max(0, frame.height - (menuBar - alreadyReserved))
         }
         return frame
+    }
+
+    // MARK: The menu bar
+
+    /// How much of `screen`'s top edge the menu bar is occupying right now — the
+    /// system's answer, from `menuBarHeight(on:)` at the top of this file.
+    ///
+    /// Notice the bar moving, place the light for it, and keep watching while it
+    /// is still in motion. Called from the same tick that reads the state file,
+    /// which is far too slow on its own: the bar takes a fraction of a second to
+    /// slide, and a light that only looked four times a second would arrive
+    /// after the bar had stopped, and jump.
+    private func syncMenuBar() {
+        guard let window, let screen = screen(of: window) else { return }
+        let measured = menuBarHeight(on: screen)
+        guard abs(measured - menuBarReserved) > Self.barStep else { return }
+        menuBarReserved = measured
+        place()
+        startSettling()
+    }
+
+    /// Follow the bar until it stops moving. This is the fast loop — the slow
+    /// one above only notices that something moved; this one keeps up with it,
+    /// and gives up after {@link settlingPatience} without a change.
+    private func startSettling() {
+        guard settling == nil else { return }
+        var lastChange = Date()
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.settlingInterval, repeats: true) { [weak self] timer in
+            guard let self, let window = self.window, let screen = screen(of: window) else {
+                timer.invalidate()
+                return
+            }
+            let measured = menuBarHeight(on: screen)
+            if abs(measured - self.menuBarReserved) > Self.barStep {
+                self.menuBarReserved = measured
+                self.place()
+                lastChange = Date()
+            } else if Date().timeIntervalSince(lastChange) > Self.settlingPatience {
+                timer.invalidate()
+                self.settling = nil
+            }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        settling = timer
+    }
+
+    /// Re-place the light for the border it is already on, without deciding the
+    /// border again and without remembering the result: this is the menu bar
+    /// moving the light, not the user.
+    ///
+    /// A light docked to the top rides the bar, because that is the edge it is
+    /// anchored to. A light on any other border keeps the position it was given,
+    /// and is only pushed clear of the bar when the bar would otherwise be drawn
+    /// over it.
+    private func place() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let want = look.size(border.orientation)
+        let origin = dockedOrigin(size: want, border: border, in: usableFrame(of: screen), from: window.frame.origin)
+        window.setFrameOrigin(origin)
     }
 
     /// The border a drop should adopt: the nearest one, unless the drop is in a
