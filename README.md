@@ -46,7 +46,7 @@ The file is the entire interface between the two halves.
 |---|---|
 | all three lenses dark | rest (`idle`): nothing is pending |
 | yellow, steady | a session is working |
-| yellow, pulsing | a session is blocked on you (`asking`) — a 1 s pulse between 30% and 100%, so it is the one thing on the strip that moves |
+| yellow, pulsing | a session is blocked on you (`asking`) — a 1.3 s pulse between 30% and 100%, so it is the one thing on the strip that moves |
 | green | a finish you have not read (`waiting`) |
 | red | the feed itself cannot be trusted |
 

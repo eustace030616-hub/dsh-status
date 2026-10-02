@@ -15,6 +15,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-10-02
+
+### Changed
+
+- **The pulse is a little slower: 1.3 s.** One second read as a flicker once it was actually on screen; the
+  sweep is unchanged at 30% → 100%. `breathPeriod` 1.0 s → 1.3 s.
+- Measured on the rendered view, sampling the yellow lens' own alpha: **0.302 → 1.000** over **1.30 s**
+  (five peaks), with a steady lit lens at 0.851 and a resting one at 0.278.
+
 ## [0.7.11] - 2026-10-02
 
 ### Changed

@@ -781,7 +781,7 @@ final class TrafficLightView: NSView {
     /// the one state that has to be noticed from across the room. It never goes
     /// dark — the two ends are **alphas**, not fractions of the Lit slider, because
     /// what a lens must never fall below is a brightness in its own right.
-    private static let breathPeriod: Double = 1.0
+    private static let breathPeriod: Double = 1.3
     /// The dim end of the pulse: a third solid.
     private static let breathFloor: Double = 0.3
     /// What a pulsing lens peaks at, whatever the Lit slider says: fully solid.
