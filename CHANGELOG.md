@@ -15,6 +15,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **README pruned where the new sections made older ones redundant.** `## Usage` is now the only place the
+  colour mapping lives — it gained the contract state names and the pulse numbers — so the duplicate
+  renderer-mapping table and the paragraph beneath it are gone. The one fact only that paragraph carried, that
+  a reader meeting a state it has never heard of rests rather than alarms, moved into the extension rule; the
+  `--print` character legend went with it. The expanded list is drawn once, in `## Usage`, so the daemon
+  section keeps only the folded first level, and two red-versus-dark bullets became one. "The renderer" is
+  "the daemon" throughout, and the contract example no longer carries a real session id and home path.
+
 ## [0.7.14] - 2026-10-02
 
 ### Changed

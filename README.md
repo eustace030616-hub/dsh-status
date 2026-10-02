@@ -16,11 +16,11 @@ One object on the screen, two gestures, and a list.
 
 | You see | It means |
 |---|---|
-| **dark** | nothing pending — rest, which is not a failure |
-| **yellow, steady** | a session is working |
-| **yellow, pulsing** | a session is blocked on you: a permission or a question |
-| **green** | a turn finished and you have not read it |
-| **red** | the feed itself cannot be trusted — the file is gone, unreadable or stale |
+| **dark** | rest (`idle`): nothing is pending, which is not a failure |
+| **yellow, steady** | a session is working (`working`) |
+| **yellow, pulsing** | a session is blocked on you (`asking`) — a 1.3 s pulse between 30% and 100%, the one thing on the strip that moves |
+| **green** | a turn finished and you have not read it (`waiting`) |
+| **red** | the feed itself cannot be trusted — gone, unreadable or stale, so nothing can be said about the session at all |
 
 | You do | It does |
 |---|---|
@@ -105,12 +105,12 @@ something that is not DSH at all
 {
   "version": 1,
   "state": "working",
-  "sessionId": "session-83248b8c-3595-4b1d-b6f5-cb9b8cdfdc44",
+  "sessionId": "session-1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
   "title": null,
   "updatedAt": 1790000000000,
   "heartbeatMs": 2000,
   "reason": "prompt",
-  "meta": { "cwd": "/Users/penghaoxi/workspace" }
+  "meta": { "cwd": "/Users/you/project" }
 }
 ```
 
@@ -122,30 +122,14 @@ something that is not DSH at all
 | `title` | Session title, or `null` (see *Known gaps*). |
 | `updatedAt` | ms epoch. **When the publisher was last heard from.** Re-stamped every `heartbeatMs` even when nothing changes — that is what makes staleness work, and why it must never be read as a change time. |
 | `changedAt` | ms epoch. **When this state was last asserted.** Written on a publish and left alone by the heartbeat, so this — not `updatedAt` — is what an acknowledgement may be compared against. |
-| `heartbeatMs` | The publisher's cadence, so the renderer need not hardcode a staleness rule. |
+| `heartbeatMs` | The publisher's cadence, so the daemon need not hardcode a staleness rule. |
 | `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `agent-idle`, `agent-running`, `approval`, `question`, `answered`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
 | `meta.sessions` | Every session the publisher is watching: `{ id, state, reason, changedAt }`. The headline `state` above is the most urgent of them, for readers that understand only one. |
-| `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. The renderer draws `total`; the breakdown rides along for a reader that wants it. Never carries a credential. |
+| `meta.account` | The account balance, when the publisher has one: `{ fetchedAt, intervalMs, isAvailable, balances: [{ currency, total, granted, toppedUp }] }`, or `{ fetchedAt, intervalMs, reason }` when the lookup failed. Figures are strings, as the provider sends them. The daemon draws `total`; the breakdown rides along for a reader that wants it. Never carries a credential. |
 
-**Renderer mapping**
-
-| The light | When |
-|---|---|
-| all three lenses dark | rest (`idle`): nothing is pending |
-| yellow, steady | a session is working |
-| yellow, pulsing | a session is blocked on you (`asking`) — a 1.3 s pulse between 30% and 100%, so it is the one thing on the strip that moves |
-| green | a finish you have not read (`waiting`) |
-| red | the feed itself cannot be trusted |
-
-Red is reserved for the feed — the file is gone, unreadable or stale, so nothing can be said about the
-session. Dark means the feed is healthy and says nothing is pending. A reader that meets a state it has
-never heard of rests rather than alarms, so adding one later cannot make an older renderer cry wolf.
-`--print` labels the same states with one character each — ⚪ 🟡 🟢 🔵 🔴 — and reads `asking` as 🔵 where the
-window pulses the yellow lens.
-
-**With several sessions** the publisher reports each one in `meta.sessions` and the renderer aggregates,
-because only the renderer knows what you have already read: a blocked session outranks a finish, a finish
+**With several sessions** the publisher reports each one in `meta.sessions` and the daemon aggregates,
+because only the daemon knows what you have already read: a blocked session outranks a finish, a finish
 outranks work, and a finish you have read is no longer a finish. So with one session finished and another
 still working you see green; once you have been back to DSH and read the finish it turns **yellow, not
 dark**, because the other session is still busy. Each session carries its own `changedAt`, so reading one
@@ -153,8 +137,10 @@ finish cannot swallow a later one.
 
 **Extension rule (how new information lands without breaking a reader).** New information — latest
 prompt cost, token counts, model name, a prompt preview for hover — goes into `meta`. New top-level
-keys are only ever *added*. Nothing is renamed or removed. `version` changes only if a reader
-written against the old shape would be wrong. `meta.cwd` is already there as the first tenant.
+keys are only ever *added*. Nothing is renamed or removed, and a reader that meets a state it has never
+heard of rests rather than alarms, so adding one later cannot make an older reader cry wolf. `version`
+changes only if a reader written against the old shape would be wrong. `meta.cwd` is already there as
+the first tenant.
 
 The package version and the contract version move independently, and every change to the contract is
 recorded in [CHANGELOG.md](CHANGELOG.md).
@@ -167,7 +153,7 @@ recorded in [CHANGELOG.md](CHANGELOG.md).
 | → `working` | `agent/pre-step` with a non-empty `messages`, or `agent/status: running` | The only verified signal that a prompt was actually accepted — the empty case is the ordinary between-steps pass and is ignored. The status is the same claim a step earlier, and it is what revives a session after a stop. |
 | → `waiting` | `agent/turn-stopping`, or `agent/status: idle` | The turn is over and the next move is the user's. Both seams are needed: `turn-stopping` covers the ordinary end, and `agent/status` covers the ends it misses — a turn the user **stops** is aborted, the abort is re-thrown, and `turn-stopping` is never dispatched, which used to leave the light claiming work until DSH was restarted. A status of `idle` also drops any ask still counted, so nothing can restore `working` afterwards. |
 | → `asking` | `approval/request` or `user-questions/request` | The agent is blocked on a permission or a question. Both seams are waterfalls, so observing means publishing before delegating and returning the real answerer's result untouched. Deliberately **not** root-filtered: a subagent blocked on an approval still needs the human. Concurrent asks are counted, so the light keeps pulsing until the last one is answered. |
-| *(ignored)* | a turn event on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` fires for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. An ask is the exception: it is charged to the parent session, because the human is still the one who answers. |
+| *(ignored)* | a turn or status event on a **subagent** | A child agent is a full agent with its own turns, so `turn-stopping` and `agent/status` fire for it too. Without the `parentSession` filter, a subagent finishing flips the light green while you are still waiting. An ask is the exception: it is charged to the parent session, because the human is still the one who answers. |
 
 Two further safety properties:
 
@@ -185,8 +171,8 @@ Every key is optional and validated by hand; any unusable value silently falls b
 |---|---|---|
 | `statePath` | `~/Library/Application Support/dsh-status/state.json` | Must be absolute. |
 | `heartbeatMs` | `2000` | Floor of 250. |
-| `launch` | `true` | Start the renderer shipped in this package, and stop it on dispose. |
-| `lightArgs` | `[]` | Extra renderer arguments — the way a browser-hosted DSH gets its `--open` and `--ack-app`. |
+| `launch` | `true` | Start the daemon shipped in this package, and stop it on dispose. |
+| `lightArgs` | `[]` | Extra daemon arguments — the way a browser-hosted DSH gets its `--open` and `--ack-app`. |
 | `balance` | `true` | Look the account balance up and publish it in `meta.account`. This is the only request the package makes. |
 | `balanceMs` | `300000` | How often. Floor of 60000. Slower than the heartbeat on purpose: an account is charged when a call is made, not second by second. |
 
@@ -210,7 +196,7 @@ lands in the profile's `node_modules` and is mounted as a profile layer, so the 
 `name: 'dsh-status'` resolves as a real package. A package *without* `dsh.bundle` is installed as a
 plain dependency with a warning — that warning is how you can tell auto-mount did not happen.
 
-The renderer ships inside the same package, under `bin/`, and the plugin starts it for you. That is the
+The daemon ships inside the same package, under `bin/`, and the plugin starts it for you. That is the
 whole install: nothing to clone, nothing to build, nothing to launch.
 
 **Then restart DSH Desktop.** The manager applies config changes live when HMR is available, but a
@@ -309,21 +295,6 @@ frame here — so `NSStatusBar.thickness` is reserved instead, and a vertical li
 so its top can never reach the bar's strip. Following the bar's own window was tried and produced a laggy
 light that overlapped the bar it was following; a side-docked light has no business in the top strip anyway.
 
-```
-Appearance ▸
-Account    ▸
-─────────────
-Quit the light
-
-Appearance ▸                    Account ▸
-  Size   ●━━━━━━━━━━  20 pt       CNY          12.62
-  Gap    ●━━━━━━━━━━   8 pt       ─────────────
-  Rest   ●━━━━━━━━━━  28%         Top up now
-  Lit    ●━━━━━━━━━━  85%         updated 2m ago
-  ─────────────
-  Reset to default
-```
-
 **The first level of the list is folded, and short.** A folded group is where a set of numbers lives — the
 light's own appearance, the account — so the first level stays down to those two and the way out. Everything
 is folded by default, and the values inside are whatever the light is wearing now.
@@ -347,9 +318,9 @@ and an unsatisfied `inject` leaves a plugin waiting rather than failing — so a
 service loses the balance and keeps the light. Declaring the same dependency on the publisher would have made
 the light wait with it, which is the one outcome this project cannot accept.
 
-**The account group is real, and filling it is the plugin's work rather than the renderer's.** The
+**The account group is real, and filling it is the plugin's work rather than the daemon's.** The
 publisher makes one authenticated `GET https://api.deepseek.com/user/balance` every `balanceMs` and puts the
-answer in `meta.account`; the renderer draws whatever it finds there — **one line per currency that actually
+answer in `meta.account`; the daemon draws whatever it finds there — **one line per currency that actually
 holds something**, titled by the currency with the figure beside it, then `Top up now` and a footer saying how
 old the answer is. A balance is one number: folding it behind its own currency name put the answer a click
 deeper than the question, and the granted/topped-up breakdown belongs to a page rather than to a light. The
@@ -357,7 +328,7 @@ endpoint answers in every currency the account has ever touched, so a currency s
 says nothing and is not drawn; a figure that cannot be read is *not* treated as zero, because an unreadable
 amount should be shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination
 DSH's account service publishes for the same purpose, not a URL invented here — and it is offered whether or
-not the balance could be read. The renderer holds no key and makes no requests, which is why a balance it
+not the balance could be read. The daemon holds no key and makes no requests, which is why a balance it
 cannot read is a dim reason rather than a number it guessed.
 
 A failure is a **code, not a message** — `no-key`, `unauthorized`, `offline`, `timeout`, `http-503`,
@@ -382,25 +353,23 @@ rendered lens over white, the ring reads 0.805 where a black one would read 0.55
 
 Properties worth keeping:
 
-- **It only ever reads.** Nothing in the renderer writes to the state file, so it cannot disturb the
+- **It only ever reads.** Nothing in the daemon writes to the state file, so it cannot disturb the
   publisher or the session.
-- **A dead feed is red, not the last colour.** The heartbeat is what makes that possible — without
-  it, a killed DSH would leave a green light claiming the agent had finished.
-- **Rest is dark, not red.** Red is reserved for a feed that cannot be trusted, so it stays rare and
-  keeps its meaning. A fresh boot, a switch to a session that has no agent yet, or a state this build
-  has not learned yet are all rest, and the reminder green is what stands out because nothing else
-  competes with it.
+- **Red is the feed, never the session.** Red is reserved for a feed that cannot be trusted, so it stays
+  rare and keeps its meaning; a fresh boot, a session with no agent yet, or a state this build has not
+  learned yet are all rest. The heartbeat is what makes the distinction possible — without it, a killed
+  DSH would leave a green light claiming the agent had finished.
 - **The gesture is a double-click, and it only navigates.** Whatever colour is showing, it switches
   between DSH and the application you came from — forward when DSH is not in front, back when it is.
   The colour answers *"should I go?"*; the click does the going, so you never have to read the light to
   know what a click will do. A single click is inert — it only draws a ring, so the gesture is visible
   while it waits for its partner — and when there is nowhere to return to it says so rather than
   silently doing nothing.
-- **Aggregation is the renderer's job.** The publisher reports every session and stops there; whether
+- **Aggregation is the daemon's job.** The publisher reports every session and stops there; whether
   a green has been read is a fact about the viewer, not about the harness, so the last step can only
   happen where the eyes are. That is why `meta.sessions` exists and why the headline `state` is only a
   convenience for simple readers.
-- **One light only.** The renderer takes an exclusive `flock` for the life of its process, so the
+- **One light only.** The daemon takes an exclusive `flock` for the life of its process, so the
   plugin's instance and a hand-launched one cannot both draw. A lock that cannot even be *opened* is not
   contention, so the light runs without one and says why — refusing to draw would be worse than a
   possible duplicate.
@@ -420,7 +389,7 @@ Properties worth keeping:
   modes, and compared against the finish's `changedAt` — a newer finish is green again rather than
   being suppressed by an older acknowledgement. Against `updatedAt` it would expire on the next
   heartbeat, which is exactly the bug this field exists to fix. A publisher too old to send
-  `changedAt` is handled by the renderer noticing the finish itself.
+  `changedAt` is handled by the daemon noticing the finish itself.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a
   package-manager install does not set the quarantine flag, so Gatekeeper is not in the path either.
 
@@ -486,14 +455,14 @@ This project never handles the API key. The plugin knows the **name** `DEEPSEEK_
   versions of this package learned that the hard way, in that order.
 - **Existence is asked with `describe()`**, which reports `{configured, source}` and by design never
   returns the value. Any surface that only needs to know *whether* a key is set uses that one.
-- **The published document is plain JSON on disk.** Numbers go in it; the key never does. The renderer is
+- **The published document is plain JSON on disk.** Numbers go in it; the key never does. The daemon is
   a reader with no network and no credentials, and it receives figures rather than secrets.
 - **Error bodies are not kept.** DeepSeek's own 401 echoes part of the key it rejected — `your api key:
   ****abcd is invalid` — so a failure is mapped to a code such as `unauthorized` or `offline`, and the
   body is dropped rather than logged. (The fragment above is a placeholder, deliberately: writing a real
   one into this file would be the very mistake the section is about.)
 - **The key is never passed to a child process.** Process arguments are readable by anything running as
-  the same user (`ps`), which is why the renderer is handed a file and not a credential.
+  the same user (`ps`), which is why the daemon is handed a file and not a credential.
 - **Tests inject the resolver and the HTTP client**, hand them a canary secret, and assert the canary
   appears nowhere: not in the published document, not in a log line, not in `process.argv`. That is what
   makes "the key stays out" a test rather than a promise.
@@ -516,4 +485,4 @@ command arguments or output. If one does escape, say so plainly and rotate it th
   gap between turns to confirm it.
 - `title` is always `null`. The session title plainly exists (the session log carries `session/title`
   events) but which accessor exposes it is unconfirmed, and a wrong guess would be worse than `null`.
-  Fill it in when the renderer needs it.
+  Fill it in when the daemon needs it.
