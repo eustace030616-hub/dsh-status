@@ -15,6 +15,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-02
+
+### Fixed
+
+- **A corner can no longer turn the light.** Around a corner the nearest border is a coin toss, so
+  nudging the light there flipped the orientation, which resized it — and a horizontal light that became
+  vertical left a lens or two off the screen. A drop within 60 points of a second border now keeps the
+  direction it had; only a drop clear of a corner can change it. The final position is clamped inside the
+  visible frame as a last guarantee.
+
+### Changed
+
+- **Resting lenses are visible and lit ones are not flat.** A resting lens went from 18% to 32% opacity
+  in the flat style and from 10% to 24% in the housing, so the traffic light reads as one when nothing is
+  lit; a lit lens is now 10% down from opaque, which keeps it looking like glass rather than a sticker.
+
+
 ## [0.5.1] - 2026-10-02
 
 ### Changed

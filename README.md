@@ -208,6 +208,11 @@ border also decides the shape: lenses stack on a side edge and lie in a row alon
 the light always grows *along* the border rather than across it. The right-click list opens flush to the
 same border, hanging inward, so an edge-docked light never opens a menu off the edge of the screen.
 
+**A drop near a corner keeps the direction it already had.** Around a corner the nearest border is a coin
+toss, and changing the shape there is what used to resize the light half off the screen; only a drop
+clear of a corner can turn it. Whatever happens, the final position is clamped inside the visible frame,
+so no shape change can park the light out of reach.
+
 ```
 Style
   ✓ Classic

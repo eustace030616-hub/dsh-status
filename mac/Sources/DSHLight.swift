@@ -778,11 +778,13 @@ final class TrafficLightView: NSView {
     private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, housing: Bool) {
         let colour = colour(of: lens)
         if lit {
-            colour.withAlphaComponent(level).setFill()
+            // Ten percent down from opaque: a lit lens still reads as glass
+            // rather than as a flat sticker.
+            colour.withAlphaComponent(0.9 * level).setFill()
         } else {
-            // Unlit is glass, not a hole: tinted in the housing, muted in the
-            // flat style, so the light keeps its shape when nothing happens.
-            colour.withAlphaComponent(housing ? 0.10 : 0.18).setFill()
+            // A resting lens is dark glass, not a hole: visible enough that the
+            // traffic light still reads as one when nothing is lit.
+            colour.withAlphaComponent(housing ? 0.24 : 0.32).setFill()
         }
         NSBezierPath(ovalIn: rect).fill()
 
@@ -862,6 +864,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var border: ScreenBorder = .right
     /// How far the light sits from the border it is docked to.
     private static let dockInset: CGFloat = 10
+    /// How close two borders have to be before a drop counts as a corner.
+    /// Around one the nearest border is a coin toss, and a change of direction
+    /// there resizes the light — which is how it ended up half off the screen.
+    private static let cornerZone: CGFloat = 60
     private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
         ? nil
         : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
@@ -957,7 +963,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dock() {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        border = nearestBorder(for: window.frame, in: visible)
+        border = borderToAdopt(for: window.frame, in: visible)
         let want = LightGeometry.of(style).size(border.orientation)
 
         // Grow inward from the border it is heading to, so a change of shape
@@ -981,6 +987,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .top: origin.y = visible.maxY - want.height - Self.dockInset
         case .bottom: origin.y = visible.minY + Self.dockInset
         }
+        // A last guarantee that no shape change can park the light off-screen.
+        origin.x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - want.width))
+        origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - want.height))
         window.setFrameOrigin(origin)
 
         view?.style = style
@@ -990,15 +999,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
     }
 
-    /// The nearest border of the screen the light is on.
-    private func nearestBorder(for frame: NSRect, in visible: NSRect) -> ScreenBorder {
-        let candidates: [(ScreenBorder, CGFloat)] = [
+    /// The border a drop should adopt: the nearest one, unless the drop is in a
+    /// corner — where the light keeps the direction it already had.
+    ///
+    /// A corner is where two borders are within {@link cornerZone} of each
+    /// other. Without that rule, nudging the light around a corner flips its
+    /// orientation, which resizes it, which is how a horizontal light turned
+    /// vertical and left a lens or two off the screen. Only snapping clear of a
+    /// corner can change the direction.
+    private func borderToAdopt(for frame: NSRect, in visible: NSRect) -> ScreenBorder {
+        let distances: [(ScreenBorder, CGFloat)] = [
             (.left, abs(frame.minX - visible.minX)),
             (.right, abs(visible.maxX - frame.maxX)),
             (.top, abs(visible.maxY - frame.maxY)),
             (.bottom, abs(frame.minY - visible.minY))
-        ]
-        return candidates.min { $0.1 < $1.1 }?.0 ?? .right
+        ].sorted { $0.1 < $1.1 }
+
+        guard let nearest = distances.first else { return border }
+        if let second = distances.dropFirst().first, second.1 - nearest.1 < Self.cornerZone {
+            return border
+        }
+        return nearest.0
     }
 
     /// Restore the last position, clamped onto a screen that still exists — a
