@@ -207,7 +207,6 @@ final class Acknowledgement {
     private static let storedKey = "DSHLight.acknowledgedAt"
 
     private let targets: Set<String>
-    private var previousFrontmost: String?
     private(set) var at: Date?
     /// The last application seen in front that was neither DSH nor the light.
     private var lastObservedFrontmost: String?
@@ -226,8 +225,9 @@ final class Acknowledgement {
         self.targets = resolved
         let stored = UserDefaults.standard.double(forKey: Acknowledgement.storedKey)
         if stored > 0 { self.at = Date(timeIntervalSince1970: stored) }
-        // Whatever is in front now was not "coming back": only a later change is.
-        self.previousFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        // Whatever is in front now is the first thing poll() will see, so a user
+        // who is already in DSH settles the light on the very first tick.
+        self.lastObservedFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
     var targetDescription: String {
@@ -236,33 +236,30 @@ final class Acknowledgement {
 
     /// Note a return to DSH. Returns true only on the transition, so a user who
     /// stays in DSH does not keep re-acknowledging.
-    @discardableResult
-    func poll() -> Bool {
+    /// Note where the user is. Looking at DSH *is* having read whatever is
+    /// waiting — the reminder exists to bring them here, so while they are here
+    /// it has nothing left to do. This also covers what a transition cannot see:
+    /// a turn that finishes while the user is already in DSH.
+    func poll() {
         let front = NSWorkspace.shared.frontmostApplication
         let identifier = front?.bundleIdentifier
-        defer { previousFrontmost = identifier }
 
         // Our own application is never recorded: clicking the light can make it
         // frontmost, and that must not be mistaken for "the user is looking at
         // DSH" — or for somewhere to return to.
-        if let identifier, identifier != Bundle.main.bundleIdentifier {
-            lastObservedFrontmost = identifier
+        guard let identifier, identifier != Bundle.main.bundleIdentifier else { return }
+        lastObservedFrontmost = identifier
+
+        if targets.contains(identifier) {
+            acknowledge()
+            return
         }
 
-        // Remember where the user was. Neither DSH nor the light itself is ever
-        // remembered: returning to either would be a no-op, and the light *does*
-        // briefly become frontmost when it is launched, which is enough to make
-        // it remember itself and break the return click entirely.
-        if let identifier, !targets.contains(identifier), identifier != Bundle.main.bundleIdentifier,
-           let url = front?.bundleURL {
+        // Remember where the user was, so a click can put them back. DSH itself
+        // is never remembered: returning to it would be a no-op.
+        if let url = front?.bundleURL {
             lastOther = (identifier, url)
         }
-
-        guard let identifier, identifier != previousFrontmost, targets.contains(identifier) else {
-            return false
-        }
-        acknowledge()
-        return true
     }
 
     /// Whether the last *real* application in front was DSH.
@@ -288,8 +285,15 @@ final class Acknowledgement {
 
     func acknowledge() {
         let now = Date()
+        let previous = at
         at = now
-        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Acknowledgement.storedKey)
+        // While the user stays in DSH this refreshes every tick, and writing the
+        // defaults plist four times a second buys nothing: the in-memory value is
+        // what the light reads, and the stored one only has to survive a restart
+        // roughly as recent.
+        if previous == nil || now.timeIntervalSince(previous!) > 5 {
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Acknowledgement.storedKey)
+        }
     }
 
     /// True when this finish happened before the user came back.

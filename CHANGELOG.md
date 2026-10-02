@@ -15,6 +15,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Being in DSH acknowledges, not just arriving.** Green settled only when DSH *became* frontmost, so a
+  turn finishing while the user was already looking at DSH stayed green until they left and came back —
+  and the only way to clear it was to click. Looking at DSH is having read it: the acknowledgement now
+  refreshes whenever DSH is in front, which is the reminder's whole purpose and covers the case a
+  transition cannot see. While the user stays there it refreshes every tick, so the stored value is
+  written every few seconds rather than four times a second.
+
 ### Planned
 
 - **Stage 3 — wiring.** The plugin spawns the renderer and reaps it on dispose. This is the point at

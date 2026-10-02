@@ -212,14 +212,16 @@ Three properties worth keeping:
   a green has been read is a fact about the viewer, not about the harness, so the last step can only
   happen where the eyes are. That is why `meta.sessions` exists and why the headline `state` is only a
   convenience for simple readers.
-- **Arriving is what acknowledges.** A finish settles when DSH comes to the front, because the watcher
-  sees that happen — so the click needs to know nothing about state, and a reminder cannot be left
-  hanging by a gesture that forgot to clear it.
+- **Being in DSH is what acknowledges.** The reminder exists to bring you here, so while you are here it
+  has nothing left to do: green settles the moment DSH is in front, not only when you arrive from
+  somewhere else. That also covers a finish landing while you are already looking at DSH, which a
+  transition test could never see. The click therefore needs to know nothing about state, and the
+  reminder cannot be left hanging by a gesture that forgot to clear it.
 - **It restores the application, not the window or tab.** That is as far as public API reaches: macOS
   will not let one application select another's window or browser tab. In practice it is what "back to
   my work" means — VSCode returns to the window being edited, the browser to the tab being read.
   Neither DSH nor the light itself is ever remembered, since returning to either would be a no-op.
-- **Green retires itself when you come back.** The publisher cannot know this: switching between
+- **Green retires itself while you are there.** The publisher cannot know this: switching between
   live sessions emits no agent event at all — verified by recording the state file across a switch,
   which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives
   on the Mac, where the frontmost window is visible. It is stored in `UserDefaults`, shared by both
