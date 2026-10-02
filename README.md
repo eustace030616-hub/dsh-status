@@ -222,21 +222,29 @@ light that overlapped the bar it was following. A side-docked light has no busin
 the strip is held back and the light is never underneath it.
 
 ```
-Size   ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  22 pt
-Gap    ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   8 pt
-Rest   ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   20%
-Lit    ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   80%
-─────────────
-   (reserved for the next thing)
+Appearance ▸
+Account    ▸
 ─────────────
 Quit the light
+
+Appearance ▸                    Account ▸
+  Size   ●━━━━━━━━━━  21 pt       Balance       —
+  Gap    ●━━━━━━━━━━   7 pt       Today         —
+  Rest   ●━━━━━━━━━━  33%         This month    —
+  Lit    ●━━━━━━━━━━  85%         ─────────────
+                                  no source wired up yet
 ```
 
-**The light is four numbers, and the list is where they are set.** There is no style to choose: one
-slider each for the size of a lens, the gap between the lenses, and how solid a resting and a lit lens
-are. Every slider applies **as it is dragged** — the window is re-fitted and re-anchored on each step, so
-the light on screen is the preview rather than a change that lands when the list closes. The values are
-remembered between runs, and `--size` overrides the size slider for a single run.
+**The list is a list of lists.** Almost everything worth putting in it is a thing with several numbers
+inside — the light's own appearance, an account balance — so each of those is a folded group and the first
+level stays down to what the light can say at a glance. Everything is folded by default, and the values
+inside are whatever the light is wearing now.
+
+**The light is four numbers, and the appearance group is where they are set.** One slider each for the
+size of a lens, the gap between the lenses, and how solid a resting and a lit lens are. Every slider
+applies **as it is dragged** — the window is re-fitted and re-anchored on each step, so the light on screen
+is the preview rather than a change that lands when the list closes. The values are remembered between
+runs, and `--size` overrides the size slider for a single run.
 
 A slider is a real control in a menu row, not a label: the row is a small view holding a hand-drawn knob,
 because the one event a menu is documented to push into a view it hosts is the mouse, while a stock
@@ -244,9 +252,13 @@ because the one event a menu is documented to push into a view it hosts is the m
 percents, so it can always reach the number the readout prints. While the list is open the light drops a
 level, below the menu, so a lens growing under a row cannot take the clicks meant for it.
 
-Orientation is not a setting at all, because there is only one: lenses stacked, red at the top. The
-separated group is where the next feature goes — one row, in the same column, so every row keeps the same
-width for free.
+**The account group is empty on purpose.** The shape is what is being settled: the labels and the column a
+balance will fill, with dashes where the figures go and a last row that says so out loud, because a dash
+can be read as a bug. Nothing in it reads anything, and `ValueRow.show(_:)` is where a real number will
+arrive when there is one.
+
+There is no highlight on the lenses, and no glass in them: a flat disc with a rim. A white highlight in
+the upper left was tried and asked away — at this size it was the busiest thing on the screen.
 
 Three properties worth keeping:
 

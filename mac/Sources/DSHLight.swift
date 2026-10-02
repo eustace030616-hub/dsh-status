@@ -826,19 +826,10 @@ final class TrafficLightView: NSView {
         }
         NSBezierPath(ovalIn: rect).fill()
 
-        // Glass, not a flat sticker: a highlight in the upper left, brighter
-        // when the lens is lit, and a heavier rim than a plain circle would
-        // have. This used to be what the nostalgic style added; with one light
-        // left it is simply how the lenses are made.
-        let shine = NSRect(
-            x: rect.minX + rect.width * 0.20,
-            y: rect.minY + rect.height * 0.58,
-            width: rect.width * 0.42,
-            height: rect.height * 0.24
-        )
-        NSColor.white.withAlphaComponent(lit ? 0.18 + 0.22 * level : 0.05).setFill()
-        NSBezierPath(ovalIn: shine).fill()
-
+        // A flat disc with a rim, and nothing else. The white highlight that
+        // used to sit in the upper left made the lenses read as glass, and it
+        // was asked for and then asked away: at this size it was the busiest
+        // thing on the screen, and a traffic light is not a lens.
         NSColor.black.withAlphaComponent(0.45).setStroke()
         let rim = NSBezierPath(ovalIn: rect)
         rim.lineWidth = 1
@@ -1177,12 +1168,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.orderFrontRegardless()
     }
 
-    /// One row per slider, in one column, so every row is the same width and a
-    /// future feature is one more row.
+    /// The list is a list of lists. Almost everything worth putting in it is a
+    /// thing with several numbers inside, and a folded group keeps the first
+    /// level down to what the light can actually say at a glance.
+    ///
+    /// One separator, not two: AppKit collapses consecutive separators when it
+    /// draws, but counts every one of them in `menu.size`, and the placement of
+    /// the list is worked out from that number.
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        menu.addItem(folded("Appearance", appearanceMenu()))
+        menu.addItem(folded("Account", accountMenu()))
+
+        // Reserved: the next folded group goes here.
+        menu.addItem(.separator())
+
+        menu.addItem(choice("Quit the light", on: false, action: #selector(quit), tag: 0))
+        return menu
+    }
+
+    /// One row per slider, in one column, so every row is the same width and a
+    /// future control is one more row. The values are whatever the light is
+    /// wearing now, which is also what a folded group leaves behind.
+    private func appearanceMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
         for field in LookField.allCases {
             let row = SliderRow(field: field, value: field.value(of: look))
             row.onChange = { [weak self] value in
@@ -1193,16 +1205,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.isEnabled = true
             menu.addItem(item)
         }
-
-        // Reserved: the next feature goes above this line, beside the sliders,
-        // in the same single column. One separator, not two: AppKit collapses
-        // consecutive separators when it draws, but counts every one of them in
-        // `menu.size`, and the placement is worked out from that number — two
-        // of them left the list eleven points off a bottom-docked light.
-        menu.addItem(.separator())
-
-        menu.addItem(choice("Quit the light", on: false, action: #selector(quit), tag: 0))
         return menu
+    }
+
+    /// An account list with no account behind it: the shape is what is being
+    /// settled, so the rows carry the labels and the columns a balance will fill
+    /// and the figures themselves are dashes. Nothing here reads anything.
+    ///
+    /// The last row says so out loud. A dash can be read as a bug, and this is
+    /// not one: it is a place a number goes.
+    private func accountMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (label, note) in [("Balance", "—"), ("Today", "—"), ("This month", "—")] {
+            let item = NSMenuItem()
+            item.view = ValueRow(label: label, value: note)
+            item.isEnabled = true
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let note = NSMenuItem(title: "no source wired up yet", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        menu.addItem(note)
+        return menu
+    }
+
+    /// A group that is closed until it is opened, which is what a submenu is.
+    private func folded(_ title: String, _ submenu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        item.isEnabled = true
+        return item
     }
 
     // MARK: The look
@@ -1330,6 +1363,50 @@ final class SliderRow: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("not built from a nib")
+    }
+}
+
+/// A label with a figure on the right, as a row of the list.
+///
+/// Deliberately the same geometry as `SliderRow` — same left inset, same right
+/// edge for the value — so a list of figures and a list of sliders line up when
+/// they are next to each other. The value is set through `show(_:)`, which is
+/// where a real number will arrive when there is one.
+final class ValueRow: NSView {
+    static let width: CGFloat = SliderRow.width
+
+    private let name: NSTextField
+    private let figure = NSTextField(labelWithString: "")
+
+    init(label: String, value: String) {
+        name = NSTextField(labelWithString: label)
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 26))
+
+        name.font = .menuFont(ofSize: 0)
+        name.textColor = .labelColor
+        name.frame = NSRect(x: 14, y: 5, width: 140, height: 16)
+        name.autoresizingMask = [.maxXMargin, .minYMargin, .maxYMargin]
+
+        figure.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        figure.textColor = .secondaryLabelColor
+        figure.alignment = .right
+        figure.frame = NSRect(x: Self.width - 14 - 80, y: 5, width: 80, height: 16)
+        figure.autoresizingMask = [.minXMargin, .minYMargin, .maxYMargin]
+        figure.stringValue = value
+
+        addSubview(name)
+        addSubview(figure)
+        autoresizingMask = [.width]
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("not built from a nib")
+    }
+
+    /// The figure for this row. Nothing calls it yet: there is no account to
+    /// ask, and the dashes are the point.
+    func show(_ value: String) {
+        figure.stringValue = value
     }
 }
 

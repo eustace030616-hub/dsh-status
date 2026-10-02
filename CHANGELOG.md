@@ -15,6 +15,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-02
+
+### Changed
+
+- **No highlight on the lenses.** A white highlight in the upper left made them read as glass, and at this
+  size it was the busiest thing on the screen. A lens is a flat disc with a rim now.
+- **The sliders are folded into an `Appearance` group.** The list is a list of lists: anything with several
+  numbers inside it is a folded group, so the first level stays down to what the light can say at a glance.
+  Folded by default, and the values inside are exactly the ones the light was already wearing.
+
+### Added
+
+- **An `Account` group, empty on purpose.** The shape is what is being settled: `Balance`, `Today` and
+  `This month` with a column for the figures, dashes in that column, and a last row saying there is no
+  source wired up yet, because a dash on its own can be read as a bug. `ValueRow.show(_:)` is where a real
+  number will arrive.
+
 ## [0.6.2] - 2026-10-02
 
 ### Changed
