@@ -279,7 +279,7 @@ answer was a good one and dropped otherwise; see [Secrets](#secrets).
 
 An account lookup **never touches `state`**. Red stays reserved for a feed that cannot be trusted, so an
 account that cannot be read is a row in a list and never a lens. `is_available: false` — not enough balance
-for API calls — is a row too, for the same reason: the bulbs answer for the agent, not for the account. A
+for API calls — is a row too, for the same reason: the lenses answer for the agent, not for the account. A
 stale feed is still drawn, because the last figures it was given are worth showing next to how old they are.
 
 There is no highlight on the lenses, and no glass in them: a flat disc with a ring. A white highlight in the

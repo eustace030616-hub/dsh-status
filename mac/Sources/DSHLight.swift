@@ -74,7 +74,7 @@ struct AccountFigures {
 ///
 /// Every field is optional because there are three things this can be: figures,
 /// a reason there are none, or nothing at all from a publisher that predates it.
-/// None of it reaches the bulbs: the light answers for the agent, not for the
+/// None of it reaches the lenses: the light answers for the agent, not for the
 /// account, so a refused key is a dim row in a list rather than a red lens.
 struct Account {
     var fetchedAt: Date?
@@ -1336,7 +1336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// endpoint answers in every currency the account has ever touched, and a
     /// currency sitting at zero is a line that says nothing. Then the way to add
     /// to it, and a footer saying how old the answer is, because hours-old
-    /// figures should not read like current ones. Nothing here can change a bulb.
+    /// figures should not read like current ones. Nothing here can change a lens.
     private func accountMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
