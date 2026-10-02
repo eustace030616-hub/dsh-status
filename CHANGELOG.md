@@ -15,6 +15,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.14] - 2026-10-02
+
+### Changed
+
+- **The project is called traffic light.** It is a DSH plugin and a macOS light daemon: the plugin writes one
+  JSON document, the daemon draws it. The README opens with that, and the repository was renamed
+  `dsh-status` → `traffic-light` — GitHub redirects the old address, and the **package** keeps the name
+  `dsh-status`, so the module that lands and the row that mounts it are unchanged.
+- **`## Usage`** — one table for what the light says, one for the two gestures plus the drag, and the list as
+  it actually looks. Everything else follows the session: a turn is yellow, a stop or a finish is green until
+  you look, and a killed harness goes red within three heartbeats.
+- **`## How the data moves`** — the pipeline drawn end to end, including what is *not* there: no socket, no
+  port, no IPC, and one direction only, which is why anything about what you have already read is decided on
+  the Mac. A new **Instances** section states what happens with one harness and many sessions (aggregated in
+  `meta.sessions`), with several harnesses (last writer wins on one path; the fixed `flock` is the piece that
+  would have to move first), and with something that is not DSH at all (write the document yourself and point
+  the daemon at it with `--state-file`).
+
 ## [0.7.13] - 2026-10-02
 
 ### Fixed

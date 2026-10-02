@@ -1,8 +1,8 @@
 {
   "name": "dsh-status",
-  "version": "0.7.13",
+  "version": "0.7.14",
   "private": true,
-  "description": "Publishes the root agent's turn state to a JSON file that the native traffic light renderer reads.",
+  "description": "Publishes every root session's turn state to one JSON document, which the macOS light daemon draws as a traffic light.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

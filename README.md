@@ -1,13 +1,101 @@
-# dsh-status
+# traffic light
 
-**A traffic light for DeepSeek Harness.** A DSH plugin publishes the session's current state to one
-small JSON file; a native macOS traffic light reads it and shows red / yellow / green above every window.
-The file is the entire interface between the two halves.
+**A DSH plugin and a macOS light daemon.** The plugin publishes what every session is doing to one small
+JSON file; the daemon reads that file and draws a traffic light above every window. Two processes, one
+document, and no socket between them.
 
-- **The publisher.** `lib/` — a DSH plugin, installed from the plugin page.
-- **The renderer.** `mac/` — `DSHLight.app`, universal and ad-hoc signed.
-- **The wiring.** The plugin starts the renderer when it mounts and stops it on dispose. The built
-  bundle ships inside the package (`bin/`), so a plugin-page install needs no clone and no toolchain.
+- **The plugin.** `lib/` — a DSH plugin, installed from the plugin page. It watches the agent lifecycle and
+  writes the document.
+- **The light daemon.** `mac/` — `DSHLight.app`, universal and ad-hoc signed. It only ever reads.
+- **The wiring.** The plugin starts the daemon when it mounts and stops it on dispose. The built bundle
+  ships inside the package (`bin/`), so a plugin-page install needs no clone and no toolchain.
+
+## Usage
+
+One object on the screen, two gestures, and a list.
+
+| You see | It means |
+|---|---|
+| **dark** | nothing pending — rest, which is not a failure |
+| **yellow, steady** | a session is working |
+| **yellow, pulsing** | a session is blocked on you: a permission or a question |
+| **green** | a turn finished and you have not read it |
+| **red** | the feed itself cannot be trusted — the file is gone, unreadable or stale |
+
+| You do | It does |
+|---|---|
+| **double-click** | switch between DSH and the application you came from, whatever colour is showing |
+| **right-click** | open the list: `Appearance`, `Account`, `Quit the light` |
+| **drag** | dock to the nearer screen edge, at whatever height you drop it; the side is remembered |
+| **single click** | nothing, on purpose — it only shows the click arrived |
+
+A green settles by itself while DSH is in front, because being here is what the reminder was asking for.
+Everything else follows the session: start a turn and it is yellow, stop or finish one and it is green
+until you look, and a killed harness goes red within three heartbeats.
+
+The list holds the light's own look and the account:
+
+```
+Appearance ▸                    Account ▸
+  Size   ●━━━━━━━━━━  20 pt       CNY          12.62
+  Gap    ●━━━━━━━━━━   8 pt       ─────────────
+  Rest   ●━━━━━━━━━━  28%         Top up now
+  Lit    ●━━━━━━━━━━  85%         updated 2m ago
+  ─────────────
+  Reset to default
+```
+
+## How the data moves
+
+Two processes, one file. There is no socket, no port, no IPC and no network between them: the document is
+the entire interface.
+
+```
+DSH Desktop                                  the light daemon (DSHLight)
+───────────                                  ───────────────────────────
+agent lifecycle events                       reads one JSON document
+  agent/pre-step      a prompt was accepted    on a 0.25 s timer
+  agent/turn-stopping the ordinary turn end    every field optional except
+  agent/status        idle | running           `state` and `updatedAt`
+  approval/request    blocked on a permission  never writes, never fetches,
+  user-questions/…    blocked on a question    holds no credential
+        │                                              ▲
+        ▼                                              │
+  lib/index.js — one complete document per change,      │
+  and the same document re-stamped every 2 s            │
+  (the heartbeat, which is what makes "dead" visible)   │
+        │                                              │
+        ▼                                              │
+  ~/Library/Application Support/dsh-status/state.json ──┘
+        written to a temp file and renamed into place,
+        so a reader never sees half a document
+```
+
+Strictly one direction: publisher → file → daemon. The daemon cannot tell the plugin anything, which is
+why everything it knows about *you* — what you have already read — is decided on the Mac.
+
+### Instances
+
+```
+one harness, many sessions
+    every root session the plugin watches travels in `meta.sessions`
+    the daemon aggregates them for the eyes:
+      blocked > unread finish > working > rest
+    → one light for any number of sessions, no extra plumbing
+
+several harnesses
+    each publisher writes the whole document, so two of them on one path
+    overwrite each other: last writer wins, and the light shows that one
+    the daemon is a singleton (`flock`) and reads one path
+    → today: one harness per user. Separate `statePath` values plus one daemon
+      per path (`--state-file`) is the shape it would take — the fixed lock is
+      the piece that would have to move first
+
+something that is not DSH at all
+    write the document yourself — `state`, `updatedAt`, `heartbeatMs` — keep
+    `updatedAt` fresh, and point the daemon at it with `--state-file PATH`
+    no code in the daemon changes: the file is the contract
+```
 
 ## The contract
 
@@ -109,11 +197,13 @@ Every key is optional and validated by hand; any unusable value silently falls b
 Add the repository in DSH's plugin page (sidebar → **Plugins**). No clone, no YAML:
 
 ```
-github:eustace030616-hub/dsh-status
+github:eustace030616-hub/traffic-light
 ```
 
-`https://github.com/eustace030616-hub/dsh-status` works too. The manager normalises `github:` /
+`https://github.com/eustace030616-hub/traffic-light` works too. The manager normalises `github:` /
 `gist:` / `git+` prefixes and pre-checks a github.com address with `git ls-remote` before pnpm runs.
+(The package is still named `dsh-status`, so the module that lands and the row that mounts it keep that
+name; only the repository was renamed, and GitHub redirects the old address.)
 
 Because the package declares `dsh.bundle`, the manager applies its overlay patch itself: the plugin
 lands in the profile's `node_modules` and is mounted as a profile layer, so the row's
@@ -134,8 +224,8 @@ For running the tests, iterating on the code, or when the git install is unavail
 the patch file up first, refuses to run twice, and parses the result:
 
 ```bash
-git clone https://github.com/eustace030616-hub/dsh-status.git ~/dsh-status
-~/dsh-status/scripts/install.sh
+git clone https://github.com/eustace030616-hub/traffic-light.git ~/traffic-light
+~/traffic-light/scripts/install.sh
 ```
 
 That appends this row to
@@ -145,7 +235,7 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 ```yaml
 - insert:
     - id: dsh-status
-      name: '/absolute/path/to/dsh-status/lib/index.js'
+      name: '/absolute/path/to/traffic-light/lib/index.js'
 ```
 
 `--print` shows the row without touching anything; `--uninstall` restores the newest backup.
@@ -159,10 +249,11 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 > dependencies, and a resolution failure inside a plugin can stop every profile from booting — that
 > is exactly the incident the desktop-pet bridge hit in its PR #104.
 
-## The renderer
+## The light daemon
 
-`mac/` builds **DSHLight.app**: a three-lens traffic light. Three states used to compete for one bulb,
-and rest had to be painted as one of them; with three lenses there is a place for everything.
+`mac/` builds **DSHLight.app** — the daemon, named for the light it draws, and the only thing here that
+touches the screen. It is a three-lens traffic light: three states used to compete for one bulb, and rest
+had to be painted as one of them; with three lenses there is a place for everything.
 
 The plugin starts this for you when it mounts and stops it on dispose, so there is nothing to launch
 by hand. Build it only when working on it, and after changing the Swift run `npm run ship` to refresh
