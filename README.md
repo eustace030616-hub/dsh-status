@@ -39,6 +39,7 @@ while the other did not exist.
 | `heartbeatMs` | The publisher's cadence, so the renderer need not hardcode a staleness rule. |
 | `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
+| `meta.sessions` | Every session the publisher is watching: `{ id, state, reason, changedAt }`. The headline `state` above is the most urgent of them, for readers that understand only one. |
 
 **Renderer mapping**
 
@@ -50,6 +51,20 @@ while the other did not exist.
 | `state: "asking"` | 🔵 blue — *the agent is blocked on you: a permission or a question* |
 | `state: "idle"`, a legacy `"unknown"`, or **any value this build does not know** | ⚪ grey — *rest* |
 
+
+**With several sessions** the publisher reports each one in `meta.sessions` and the renderer
+aggregates, because only the renderer knows what you have already read:
+
+| Condition | Light |
+|---|---|
+| any session `asking` | 🔵 blue — a blocked agent cannot proceed, so it outranks everything |
+| any session `waiting` that you have not read | 🟢 green — *even while other sessions work*, so a finish is never swallowed by unrelated work |
+| any session `working` | 🟡 yellow |
+| otherwise | ⚪ grey |
+
+So with one session finished and another still working you see green; once you have been back to DSH
+and read the finish it turns **yellow, not grey**, because the other session is still busy. Each
+session carries its own `changedAt`, so reading one finish cannot swallow a later one.
 
 The split between red and grey is the important one. **Red means the feed itself cannot be trusted**
 — the file is gone, unreadable or stale, so nothing can be said about the session. **Grey means the
@@ -193,6 +208,10 @@ Three properties worth keeping:
   know what a click will do. A single click is inert — it only draws a ring, so the gesture is visible
   while it waits for its partner — and when there is nowhere to return to it says so rather than
   silently doing nothing.
+- **Aggregation is the renderer's job.** The publisher reports every session and stops there; whether
+  a green has been read is a fact about the viewer, not about the harness, so the last step can only
+  happen where the eyes are. That is why `meta.sessions` exists and why the headline `state` is only a
+  convenience for simple readers.
 - **Arriving is what acknowledges.** A finish settles when DSH comes to the front, because the watcher
   sees that happen — so the click needs to know nothing about state, and a reminder cannot be left
   hanging by a gesture that forgot to clear it.

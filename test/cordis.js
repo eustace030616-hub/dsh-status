@@ -87,7 +87,8 @@ await check('agent/created through the real emitter records the session', async 
   const doc = read()
   assert.equal(doc.state, 'idle')
   assert.equal(doc.sessionId, 'session-root')
-  assert.deepEqual(doc.meta, { cwd: '/tmp/project' })
+  assert.equal(doc.meta.cwd, '/tmp/project')
+  assert.deepEqual(doc.meta.sessions.map((s) => s.state), ['idle'])
 })
 
 await check('agent/pre-step delegates: the waterfall reaches its inner behaviour', async () => {
@@ -134,6 +135,16 @@ await check('a subagent prompt is ignored under real dispatch — no false yello
 })
 
 await check('an approval through the real waterfall still gets the real answer', async () => {
+  // Put the session to work first, so the test can prove the ask returns it to
+  // the state it was in rather than to a hard-coded one.
+  await ctx.waterfall(
+    'agent/pre-step',
+    { agent: ROOT_AGENT, messages: [{ role: 'user' }], turn: 2, step: 1 },
+    () => 'inner'
+  )
+  const before = read()
+  assert.equal(before.state, 'working')
+
   let release
   const gate = new Promise((resolve) => { release = resolve })
   const pending = ctx.waterfall(
@@ -145,7 +156,7 @@ await check('an approval through the real waterfall still gets the real answer',
   assert.equal(read().state, 'asking', 'the observer did not turn the light blue')
   release()
   assert.equal(await pending, 'unavailable', 'the observer swallowed the real answer')
-  assert.equal(read().state, 'working')
+  assert.equal(read().state, 'working', 'the ask must restore the state it interrupted')
 })
 
 await check('fiber disposal runs the effect disposer and clears the session', async () => {

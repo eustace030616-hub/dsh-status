@@ -50,6 +50,14 @@ private let fallbackHeartbeatMs = 2000.0
 private let defaultStatePath =
     ("~/Library/Application Support/dsh-status/state.json" as NSString).expandingTildeInPath
 
+/// One session, as the publisher reports it. Kept whole rather than reduced to
+/// the headline because only the renderer knows what the user has already read.
+struct SessionSummary {
+    var id: String
+    var state: Light
+    var changedAt: Date?
+}
+
 struct Reading {
     var light: Light
     /// Why this light: the publisher's `reason`, or why we could not trust it.
@@ -66,6 +74,9 @@ struct Reading {
     var changedAt: Date?
     /// The heartbeat expired: the last state is no longer a claim about now.
     var stale = false
+    /// Every session the publisher is watching, when it reports them.
+    /// Empty for a publisher that predates the snapshot.
+    var sessions: [SessionSummary] = []
 
     /// The feed is unusable, however readable it was.
     static func broken(_ detail: String) -> Reading {
@@ -136,6 +147,19 @@ enum StateFile {
             )
         }
 
+        var sessions: [SessionSummary] = []
+        if let meta = object["meta"] as? [String: Any],
+           let reported = meta["sessions"] as? [[String: Any]] {
+            sessions = reported.compactMap { item in
+                guard let id = item["id"] as? String, let state = item["state"] as? String else {
+                    return nil
+                }
+                let changedAt = (item["changedAt"] as? NSNumber)
+                    .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+                return SessionSummary(id: id, state: Light(published: state), changedAt: changedAt)
+            }
+        }
+
         // An unrecognised value is rest, not failure: the feed is healthy and
         // simply says something this build has not learned yet.
         let light = Light(published: object["state"] as? String ?? "")
@@ -145,7 +169,8 @@ enum StateFile {
             sessionId: sessionId,
             age: age,
             publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000),
-            changedAt: changedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) }
+            changedAt: changedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) },
+            sessions: sessions
         )
     }
 }
@@ -274,6 +299,14 @@ final class Acknowledgement {
     }
 }
 
+/// The same reading with a different light and reason.
+private func shown(_ reading: Reading, as light: Light, why detail: String) -> Reading {
+    var changed = reading
+    changed.light = light
+    changed.detail = detail
+    return changed
+}
+
 /// Watches for the moment a finish appears.
 ///
 /// Needed for a publisher that predates `changedAt`, whose only timestamp is the
@@ -307,13 +340,45 @@ func displayed(
     acknowledgedBy acknowledgement: Acknowledgement?,
     finishObservedAt: Date?
 ) -> Reading {
+    guard reading.light != .broken else { return reading }
+
+    // Several sessions can be live at once, and the publisher reports all of
+    // them. The aggregation happens here because an acknowledgement is a fact
+    // about the viewer and only this side has it. Most urgent first:
+    //   - a session blocked on the user outranks everything: it cannot proceed;
+    //   - a finish the user has not read is green, *even while other sessions
+    //     work* — otherwise unrelated work would swallow the finish;
+    //   - any remaining work is yellow;
+    //   - otherwise the light rests.
+    // That is what makes "one finished, one still working" show green, and then
+    // yellow rather than grey once the user has come back and read the finish.
+    if !reading.sessions.isEmpty {
+        if reading.sessions.contains(where: { $0.state == .asking }) {
+            return shown(reading, as: .asking, why: "blocked on you")
+        }
+        let unread = reading.sessions.filter { session in
+            guard session.state == .waiting else { return false }
+            let stamp = session.changedAt ?? reading.changedAt ?? finishObservedAt
+            return acknowledgement?.covers(stamp) != true
+        }
+        if !unread.isEmpty {
+            return shown(
+                reading,
+                as: .waiting,
+                why: unread.count == 1 ? "finished, unread" : "\(unread.count) finished, unread"
+            )
+        }
+        let working = reading.sessions.filter { $0.state == .working }.count
+        if working > 0 {
+            return shown(reading, as: .working, why: working == 1 ? "working" : "\(working) working")
+        }
+        return shown(reading, as: .idle, why: "rest")
+    }
+
     guard reading.light == .waiting else { return reading }
     guard let finishAt = reading.changedAt ?? finishObservedAt else { return reading }
     guard acknowledgement?.covers(finishAt) == true else { return reading }
-    var settled = reading
-    settled.light = .idle
-    settled.detail = "\(reading.detail) · back in dsh"
-    return settled
+    return shown(reading, as: .idle, why: "\(reading.detail) · back in dsh")
 }
 
 // MARK: - Options

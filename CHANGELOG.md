@@ -25,6 +25,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A second root agent. `agent/created` overwrites the recorded session, so concurrent root agents
   would make the published state follow whichever spoke last.
 
+## [0.3.0] - 2026-10-02
+
+### Added
+
+- **Several sessions at once.** The publisher held one headline state, so whichever session spoke last
+  decided the light: with two running, one finishing turned it green while the other was still working,
+  and nothing could say otherwise. Every root session now keeps its own entry — state, reason and
+  `changedAt` — published in `meta.sessions`, while the top-level `state` stays the most urgent of them
+  so readers that understand only one keep working. An ask is charged to the session that owns it, so a
+  subagent blocked on an approval marks its parent rather than becoming a session of its own.
+- **The renderer aggregates, because only it knows what you have read.** A blocked session outranks
+  everything; an unread finish outranks work, so a finish is never swallowed by another session's work;
+  then work; then rest. That is what makes the light turn **yellow rather than grey** once you have read
+  one finish while another session is still busy.
+
 ## [0.2.0] - 2026-10-02
 
 ### Changed

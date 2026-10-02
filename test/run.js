@@ -83,7 +83,7 @@ await check('init: publishes idle, creates the directory, writes a full document
   assert.equal(doc.sessionId, null)
   assert.equal(doc.title, null)
   assert.equal(doc.heartbeatMs, 60000)
-  assert.deepEqual(doc.meta, {})
+  assert.deepEqual(doc.meta.sessions, [])
   assert.ok(Number.isFinite(doc.updatedAt))
 })
 
@@ -97,7 +97,8 @@ await check('agent/created (root): records the session, stays idle', async () =>
   assert.equal(doc.state, 'idle')
   assert.equal(doc.reason, 'session-start')
   assert.equal(doc.sessionId, 'session-root')
-  assert.deepEqual(doc.meta, { cwd: '/tmp/project' })
+  assert.equal(doc.meta.cwd, '/tmp/project')
+  assert.ok(Array.isArray(doc.meta.sessions) && doc.meta.sessions.length >= 1)
 })
 
 await check('agent/pre-step (root, prompt): working, and the waterfall is delegated', async () => {
@@ -203,6 +204,47 @@ await check('a real change moves changedAt, and repeating the same state does no
   assert.equal(read().changedAt, after.changedAt, 'a repeated identity must keep changedAt')
 })
 
+await check('a finish is not hidden by another session still working', async () => {
+  const second = { session: { id: 'session-second', header: { cwd: '/tmp/other' } } }
+  await fire(main, 'agent/pre-step', { agent: second, messages: [{ role: 'user' }] })
+  const doc = read()
+  assert.equal(doc.state, 'waiting', 'the finish must stay the headline while the other works')
+  assert.equal(doc.sessionId, 'session-root')
+  const states = Object.fromEntries(doc.meta.sessions.map((s) => [s.id, s.state]))
+  assert.deepEqual(states, { 'session-root': 'waiting', 'session-second': 'working' })
+})
+
+await check('a blocked session outranks a finish, and returns to work when answered', async () => {
+  const second = { session: { id: 'session-second', header: { cwd: '/tmp/other' } } }
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const pending = main.handlers.get('approval/request')({ agent: second }, () => gate.then(() => 'allow'))
+  await sleep(5)
+  assert.equal(read().state, 'asking')
+  assert.equal(read().meta.sessions.find((s) => s.id === 'session-second').state, 'asking')
+  release()
+  assert.equal(await pending, 'allow')
+  const after = read()
+  assert.equal(after.state, 'waiting', 'the finish is the headline again once the ask is answered')
+  assert.equal(after.meta.sessions.find((s) => s.id === 'session-second').state, 'working')
+})
+
+await check('a subagent ask is charged to its parent session, not to itself', async () => {
+  const child = {
+    session: { id: 'session-child', header: { parentSession: 'session-root', cwd: '/tmp/project' } }
+  }
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const pending = main.handlers.get('approval/request')({ agent: child }, () => gate.then(() => 'allow'))
+  await sleep(5)
+  const doc = read()
+  assert.equal(doc.state, 'asking')
+  assert.equal(doc.meta.sessions.find((s) => s.id === 'session-root').state, 'asking')
+  assert.equal(doc.meta.sessions.some((s) => s.id === 'session-child'), false)
+  release()
+  await pending
+})
+
 const beat = makeCtx()
 const beatPath = join(root, 'beat', 'state.json')
 apply(beat.ctx, { statePath: beatPath, heartbeatMs: 250 })
@@ -231,7 +273,8 @@ await check('a mid-turn mount latches the session from turn-stopping alone', asy
   const doc = readLate()
   assert.equal(doc.state, 'waiting')
   assert.equal(doc.sessionId, 'session-root', 'the first actionable state must name its session')
-  assert.deepEqual(doc.meta, { cwd: '/tmp/project' })
+  assert.equal(doc.meta.cwd, '/tmp/project')
+  assert.ok(Array.isArray(doc.meta.sessions) && doc.meta.sessions.length >= 1)
   for (const dispose of late.disposers) dispose()
 })
 
