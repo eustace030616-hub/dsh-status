@@ -397,6 +397,9 @@ struct Options {
     var interval = 0.25
     /// Bundle identifiers whose return to the front acknowledges a finish.
     var ackTargets: Set<String> = []
+    /// Appearance overrides; nil means "use whatever was chosen last".
+    var style: LightStyle?
+    var orientation: LightOrientation?
     /// Set by --no-ack: green is kept until the publisher says otherwise.
     var ackDisabled = false
 
@@ -444,6 +447,10 @@ struct Options {
                 if let raw = value(), let seconds = Double(raw), seconds > 0 { options.interval = seconds }
             case "--size":
                 if let raw = value(), let points = Double(raw), points > 4 { options.diameter = CGFloat(points) }
+            case "--style":
+                options.style = value() == "nostalgic" ? .nostalgic : .classic
+            case "--orientation":
+                options.orientation = value() == "vertical" ? .vertical : .horizontal
             case "--ack-app":
                 if let identifier = value() { options.ackTargets.insert(identifier) }
             case "--no-ack":
@@ -547,51 +554,205 @@ func runPrintMode(_ options: Options) {
 
 // MARK: - Window mode
 
-final class DotView: NSView {
+
+// MARK: - Appearance
+
+/// Two visual languages. A style never assumes an orientation: the two are
+/// independent axes, and every combination has to work.
+enum LightStyle: String, CaseIterable {
+    case classic
+    case nostalgic
+
+    var title: String {
+        switch self {
+        case .classic: return "Classic"
+        case .nostalgic: return "Nostalgic"
+        }
+    }
+}
+
+enum LightOrientation: String, CaseIterable {
+    case horizontal
+    case vertical
+
+    var title: String {
+        switch self {
+        case .horizontal: return "Horizontal"
+        case .vertical: return "Vertical"
+        }
+    }
+}
+
+/// Lens measurements for one style, in one place, so the window size, the
+/// drawing and the snapping cannot disagree about how big the light is.
+struct LightGeometry {
+    var lens: CGFloat
+    var gap: CGFloat
+    var padding: CGFloat
+    var housing: Bool
+
+    static func of(_ style: LightStyle) -> LightGeometry {
+        switch style {
+        case .classic: return LightGeometry(lens: 18, gap: 8, padding: 8, housing: false)
+        case .nostalgic: return LightGeometry(lens: 26, gap: 10, padding: 10, housing: true)
+        }
+    }
+
+    func size(_ orientation: LightOrientation) -> NSSize {
+        let lenses = 3
+        let length = CGFloat(lenses) * lens + CGFloat(lenses - 1) * gap + 2 * padding
+        let breadth = lens + 2 * padding
+        return orientation == .horizontal
+            ? NSSize(width: length, height: breadth)
+            : NSSize(width: breadth, height: length)
+    }
+}
+
+/// Which border the light is docked to. Remembered, because the menu is placed
+/// flush to the same one.
+enum ScreenBorder: String {
+    case left, right, top, bottom
+}
+
+/// One lens of the three, in the order a traffic light and an Apple window
+/// button pair both use: stop, wait, go.
+enum Lens {
+    case red, yellow, green
+}
+
+final class TrafficLightView: NSView {
     var reading = Reading.broken("starting") {
+        didSet {
+            updateBreathing()
+            needsDisplay = true
+        }
+    }
+    var style: LightStyle = .classic {
         didSet { needsDisplay = true }
     }
+    var orientation: LightOrientation = .horizontal {
+        didSet { needsDisplay = true }
+    }
+
     var onTap: (() -> Void)?
     var onMove: ((NSPoint) -> Void)?
+    var onMenu: (() -> Void)?
 
     private var originAtDragStart: NSPoint?
     private var mouseAtDragStart: NSPoint?
     private var dragged = false
-    /// Read on mouse-down, which is where AppKit sets it reliably. The gesture
-    /// is two clicks on purpose: one stray click must not move the user.
+    /// Read on mouse-down, where AppKit sets it reliably. Two clicks on purpose:
+    /// one stray click must not move the user.
     private var clicksAtMouseDown = 1
-    /// When the first of the two clicks landed. A two-click gesture with no
-    /// feedback is indistinguishable from a dead one, which is how the
-    /// swallowed-click bug stayed invisible for so long.
+    /// When the first of the two clicks landed, so the dot can show it arrived.
     private var pendingUntil: Date?
 
-    private func colour(for light: Light) -> NSColor {
-        switch light {
-        case .idle: return .systemGray
-        case .working: return .systemYellow
-        case .waiting: return .systemGreen
-        case .asking: return .systemBlue
-        case .broken: return .systemRed
+    /// A slow breath rather than a blink: a session blocked on the user should
+    /// read as alive, not as an alarm. It never goes fully dark.
+    private static let breathPeriod: Double = 2.6
+    private static let breathFloor: Double = 0.25
+    private var breathEpoch = Date()
+    private var breathTimer: Timer?
+
+    deinit {
+        breathTimer?.invalidate()
+    }
+
+    private var needsBreathing: Bool {
+        reading.light == .asking
+    }
+
+    /// A redraw clock that runs only while something is breathing.
+    private func updateBreathing() {
+        if needsBreathing, breathTimer == nil {
+            breathEpoch = Date()
+            let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                self?.needsDisplay = true
+            }
+            RunLoop.current.add(timer, forMode: .common)
+            breathTimer = timer
+        } else if !needsBreathing, let timer = breathTimer {
+            timer.invalidate()
+            breathTimer = nil
+        }
+    }
+
+    /// Full brightness, except for the yellow lens when it is breathing.
+    private func level(for lens: Lens) -> Double {
+        guard lens == .yellow, needsBreathing else { return 1 }
+        let phase = Date().timeIntervalSince(breathEpoch)
+            .truncatingRemainder(dividingBy: Self.breathPeriod) / Self.breathPeriod
+        return Self.breathFloor + (1 - Self.breathFloor) * (0.5 + 0.5 * sin(2 * .pi * phase))
+    }
+
+    /// Which lens is lit, if any. Rest is every lens dark, which is what a real
+    /// traffic light with nothing to say looks like.
+    private func litLens() -> Lens? {
+        switch reading.light {
+        case .broken: return .red
+        case .asking, .working: return .yellow
+        case .waiting: return .green
+        case .idle: return nil
+        }
+    }
+
+    private func colour(of lens: Lens) -> NSColor {
+        switch lens {
+        case .red: return .systemRed
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        }
+    }
+
+    /// Lenses in fixed order, laid out along the current axis.
+    private func lensRects() -> [(Lens, NSRect)] {
+        let geometry = LightGeometry.of(style)
+        let step = geometry.lens + geometry.gap
+        return [Lens.red, .yellow, .green].enumerated().map { index, lens in
+            let distance = CGFloat(index) * step
+            let rect: NSRect
+            if orientation == .horizontal {
+                rect = NSRect(
+                    x: geometry.padding + distance,
+                    y: geometry.padding,
+                    width: geometry.lens,
+                    height: geometry.lens
+                )
+            } else {
+                rect = NSRect(
+                    x: geometry.padding,
+                    y: bounds.height - geometry.padding - geometry.lens - distance,
+                    width: geometry.lens,
+                    height: geometry.lens
+                )
+            }
+            return (lens, rect)
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let dot = bounds.insetBy(dx: 8, dy: 8)
-        // A pale halo keeps the dot readable on a dark wallpaper; the dot's own
-        // colour carries on a light one.
-        NSColor.white.withAlphaComponent(0.85).setFill()
-        NSBezierPath(ovalIn: dot.insetBy(dx: -3, dy: -3)).fill()
+        let geometry = LightGeometry.of(style)
+        let lit = litLens()
 
-        colour(for: reading.light).setFill()
-        NSBezierPath(ovalIn: dot).fill()
+        if geometry.housing {
+            let body = NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 1, dy: 1),
+                xRadius: min(bounds.width, bounds.height) / 3,
+                yRadius: min(bounds.width, bounds.height) / 3
+            )
+            NSColor(calibratedWhite: 0.13, alpha: 0.92).setFill()
+            body.fill()
+            NSColor.black.withAlphaComponent(0.35).setStroke()
+            body.lineWidth = 1
+            body.stroke()
+        }
 
-        NSColor.black.withAlphaComponent(0.22).setStroke()
-        let edge = NSBezierPath(ovalIn: dot)
-        edge.lineWidth = 1
-        edge.stroke()
+        for (lens, rect) in lensRects() {
+            let isLit = lens == lit
+            draw(lens: lens, in: rect, lit: isLit, level: isLit ? level(for: lens) : 0, housing: geometry.housing)
+        }
 
         if let until = pendingUntil, Date() < until {
-            // A ring while a first click waits for its partner.
             NSColor.white.withAlphaComponent(0.95).setStroke()
             let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 2.5, dy: 2.5))
             ring.lineWidth = 2
@@ -599,10 +760,38 @@ final class DotView: NSView {
         }
     }
 
+    private func draw(lens: Lens, in rect: NSRect, lit: Bool, level: Double, housing: Bool) {
+        let colour = colour(of: lens)
+        if lit {
+            colour.withAlphaComponent(level).setFill()
+        } else {
+            // Unlit is glass, not a hole: tinted in the housing, muted in the
+            // flat style, so the light keeps its shape when nothing happens.
+            colour.withAlphaComponent(housing ? 0.10 : 0.18).setFill()
+        }
+        NSBezierPath(ovalIn: rect).fill()
+
+        if housing {
+            // The beginnings of a glass read: a highlight in the upper left,
+            // brighter when the lens is lit. The texture is refined later.
+            let shine = NSRect(
+                x: rect.minX + rect.width * 0.20,
+                y: rect.minY + rect.height * 0.58,
+                width: rect.width * 0.42,
+                height: rect.height * 0.24
+            )
+            NSColor.white.withAlphaComponent(lit ? 0.18 + 0.22 * level : 0.05).setFill()
+            NSBezierPath(ovalIn: shine).fill()
+        }
+
+        NSColor.black.withAlphaComponent(housing ? 0.45 : 0.22).setStroke()
+        let rim = NSBezierPath(ovalIn: rect)
+        rim.lineWidth = 1
+        rim.stroke()
+    }
+
     /// AppKit uses the first click on an inactive window *only* to activate it
-    /// and never delivers it, which cost every gesture exactly one extra click:
-    /// a single click needed two, and a double-click needed three. This is the
-    /// documented override that delivers it.
+    /// and never delivers it, which would cost every gesture one extra click.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     // Manual drag so that a click and a drag can share one small target.
@@ -630,8 +819,6 @@ final class DotView: NSView {
         if dragged {
             if let origin = window?.frame.origin { onMove?(origin) }
         } else if clicksAtMouseDown >= 2 {
-            // Only the second click acts. A single click is inert, so a stray
-            // one while working elsewhere cannot take the screen away.
             pendingUntil = nil
             needsDisplay = true
             onTap?()
@@ -644,27 +831,49 @@ final class DotView: NSView {
             }
         }
     }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onMenu?()
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let options: Options
     private var window: NSWindow?
-    private var view: DotView?
+    private var view: TrafficLightView?
     private var timer: Timer?
     private let finishes = FinishTracker()
+    private var style: LightStyle = .classic
+    private var orientation: LightOrientation = .horizontal
+    private var border: ScreenBorder = .right
+    /// How far the light sits from the border it is docked to.
+    private static let dockInset: CGFloat = 10
     private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
         ? nil
         : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
+
     private static let originKey = "DSHLight.windowOrigin"
+    private static let styleKey = "DSHLight.style"
+    private static let orientationKey = "DSHLight.orientation"
+    private static let borderKey = "DSHLight.border"
 
     init(options: Options) {
         self.options = options
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let side = options.diameter + 16
+        let defaults = UserDefaults.standard
+        style = options.style
+            ?? LightStyle(rawValue: defaults.string(forKey: Self.styleKey) ?? "")
+            ?? .classic
+        orientation = options.orientation
+            ?? LightOrientation(rawValue: defaults.string(forKey: Self.orientationKey) ?? "")
+            ?? .horizontal
+        border = ScreenBorder(rawValue: defaults.string(forKey: Self.borderKey) ?? "") ?? .right
+
+        let size = LightGeometry.of(style).size(orientation)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: side, height: side),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: .borderless,
             backing: .buffered,
             defer: false
@@ -679,34 +888,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = false
 
-        let view = DotView(frame: NSRect(x: 0, y: 0, width: side, height: side))
-        view.onTap = { [weak self] in
-            guard let self else { return }
-            // The gesture navigates and nothing else: it moves between DSH and
-            // the application the user came from, whichever way they are
-            // pointing and whatever colour is showing. The colour answers
-            // "should I go?"; the click only does the going, so the user never
-            // has to read the light before deciding what a click will do.
-            //
-            // It needs no knowledge of state because arriving at DSH *is* what
-            // acknowledges a finish — the frontmost watcher sees it — so the
-            // reminder settles on its own.
-            if self.acknowledgement?.isLookingAtTarget == true {
-                self.acknowledgement?.returnToLastOther()
-            } else {
-                self.bringHarnessForward()
-            }
-        }
-        view.onMove = { origin in
-            UserDefaults.standard.set([origin.x, origin.y], forKey: AppDelegate.originKey)
-        }
+        let view = TrafficLightView(frame: NSRect(origin: .zero, size: size))
+        view.style = style
+        view.orientation = orientation
+        view.onTap = { [weak self] in self?.navigate() }
+        view.onMove = { [weak self] _ in self?.dock() }
+        view.onMenu = { [weak self] in self?.showMenu() }
         window.contentView = view
 
-        window.setFrameOrigin(restoredOrigin(side: side))
+        window.setFrameOrigin(restoredOrigin(size: size))
         window.orderFrontRegardless()
 
         self.window = window
         self.view = view
+        dock()
 
         refresh()
         let timer = Timer.scheduledTimer(withTimeInterval: options.interval, repeats: true) { [weak self] _ in
@@ -721,10 +916,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acknowledgement?.poll()
         let raw = StateFile.read(at: options.statePath)
         let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
-        // Redraw only when the colour actually changes: the dot is idle most of
-        // the time, and the reading itself changes every heartbeat tick.
+        // Redraw only when the colour actually changes: the light is idle most
+        // of the time, and the reading itself changes every heartbeat tick.
         if reading.light != view.reading.light {
             view.reading = reading
+        }
+    }
+
+    /// A double-click means "take me to what needs me, then put me back": the
+    /// colour answers whether to go, the gesture only does the going.
+    private func navigate() {
+        if acknowledgement?.isLookingAtTarget == true {
+            acknowledgement?.returnToLastOther()
+        } else {
+            bringHarnessForward()
         }
     }
 
@@ -735,51 +940,207 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Restore the last position, clamped onto a screen that still exists —
-    /// a display that went away must not strand the light off-screen.
-    private func restoredOrigin(side: CGFloat) -> NSPoint {
-        guard let saved = UserDefaults.standard.array(forKey: AppDelegate.originKey) as? [Double],
-              saved.count == 2 else {
-            return defaultOrigin(side: side)
+    // MARK: Docking
+
+    /// Flush to whichever border of its screen is nearest, and remember which,
+    /// because the menu is placed against the same one.
+    private func dock() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let frame = window.frame
+        let candidates: [(ScreenBorder, CGFloat)] = [
+            (.left, abs(frame.minX - visible.minX)),
+            (.right, abs(visible.maxX - frame.maxX)),
+            (.top, abs(visible.maxY - frame.maxY)),
+            (.bottom, abs(frame.minY - visible.minY))
+        ]
+        border = candidates.min { $0.1 < $1.1 }?.0 ?? .right
+
+        var origin = frame.origin
+        switch border {
+        case .left: origin.x = visible.minX + Self.dockInset
+        case .right: origin.x = visible.maxX - frame.width - Self.dockInset
+        case .top: origin.y = visible.maxY - frame.height - Self.dockInset
+        case .bottom: origin.y = visible.minY + Self.dockInset
         }
-        let candidate = NSRect(x: saved[0], y: saved[1], width: side, height: side)
+        window.setFrameOrigin(origin)
+
+        UserDefaults.standard.set(border.rawValue, forKey: Self.borderKey)
+        UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
+    }
+
+    /// Restore the last position, clamped onto a screen that still exists — a
+    /// display that went away must not strand the light off-screen.
+    private func restoredOrigin(size: NSSize) -> NSPoint {
+        guard let saved = UserDefaults.standard.array(forKey: Self.originKey) as? [Double],
+              saved.count == 2 else {
+            return defaultOrigin(size: size)
+        }
+        let candidate = NSRect(x: saved[0], y: saved[1], width: size.width, height: size.height)
         let visible = NSScreen.screens.contains { $0.visibleFrame.intersects(candidate) }
-        return visible ? candidate.origin : defaultOrigin(side: side)
+        return visible ? candidate.origin : defaultOrigin(size: size)
     }
 
     /// Top-right of the main screen's visible frame, clear of the menu bar.
-    private func defaultOrigin(side: CGFloat) -> NSPoint {
+    private func defaultOrigin(size: NSSize) -> NSPoint {
         guard let frame = NSScreen.main?.visibleFrame else { return NSPoint(x: 40, y: 40) }
-        return NSPoint(x: frame.maxX - side - 16, y: frame.maxY - side - 16)
+        return NSPoint(
+            x: frame.maxX - size.width - Self.dockInset,
+            y: frame.maxY - size.height - Self.dockInset
+        )
     }
+
+    // MARK: Menu
+
+    /// The list hangs inward from the border the light is docked to, so a docked
+    /// light never opens a menu off the edge of the screen.
+    private func showMenu() {
+        guard let window else { return }
+        let menu = buildMenu()
+        let frame = window.frame
+        let width = menu.size.width
+        let height = menu.size.height
+        let anchor: NSPoint
+        switch border {
+        case .right: anchor = NSPoint(x: frame.minX - width, y: frame.maxY)
+        case .left: anchor = NSPoint(x: frame.maxX, y: frame.maxY)
+        case .top: anchor = NSPoint(x: frame.minX, y: frame.minY - height)
+        case .bottom: anchor = NSPoint(x: frame.minX, y: frame.maxY)
+        }
+        menu.popUp(positioning: nil, at: anchor, in: nil)
+    }
+
+    /// Groups in one list, so a future feature is one entry — and a single
+    /// column gives every row the same width for free.
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        menu.addItem(header("Style"))
+        for style in LightStyle.allCases {
+            let item = choice(style.title, on: style == self.style, action: #selector(chooseStyle(_:)), tag: 0)
+            item.representedObject = style
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(header("Orientation"))
+        for orientation in LightOrientation.allCases {
+            let item = choice(
+                orientation.title,
+                on: orientation == self.orientation,
+                action: #selector(chooseOrientation(_:)),
+                tag: 0
+            )
+            item.representedObject = orientation
+            menu.addItem(item)
+        }
+
+        // Reserved: the next feature goes here, between separators.
+        menu.addItem(.separator())
+        menu.addItem(.separator())
+
+        menu.addItem(choice("Quit the light", on: false, action: #selector(quit), tag: 0))
+        return menu
+    }
+
+    private func header(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    private func choice(_ title: String, on: Bool, action: Selector, tag: Int) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = on ? .on : .off
+        item.tag = tag
+        return item
+    }
+
+    @objc private func chooseStyle(_ sender: NSMenuItem) {
+        guard let style = sender.representedObject as? LightStyle else { return }
+        self.style = style
+        UserDefaults.standard.set(style.rawValue, forKey: Self.styleKey)
+        refit()
+    }
+
+    @objc private func chooseOrientation(_ sender: NSMenuItem) {
+        guard let orientation = sender.representedObject as? LightOrientation else { return }
+        self.orientation = orientation
+        UserDefaults.standard.set(orientation.rawValue, forKey: Self.orientationKey)
+        refit()
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    /// Re-fit the window after a style or orientation change, keeping the corner
+    /// furthest from the docked border, so the light grows inward rather than
+    /// jumping across the screen.
+    private func refit() {
+        guard let window, let view else { return }
+        let size = LightGeometry.of(style).size(orientation)
+        let old = window.frame
+        var origin = old.origin
+        switch border {
+        case .right: origin.x = old.maxX - size.width
+        case .left: origin.x = old.minX
+        case .top: origin.y = old.maxY - size.height
+        case .bottom: origin.y = old.minY
+        }
+        view.style = style
+        view.orientation = orientation
+        window.setFrame(NSRect(origin: origin, size: size), display: true)
+        dock()
+    }
+}
+
+/// What the singleton lock came to.
+private enum LockResult {
+    /// This process holds it.
+    case held(Int32)
+    /// It could not even be opened. That is not contention, so the light runs
+    /// anyway — refusing to draw would be worse than a possible duplicate.
+    case unavailable(String)
+    /// Another light holds it.
+    case busy
 }
 
 /// An advisory lock held for the life of the process.
 ///
 /// One light only: the plugin launches one on every boot, and a hand-launched
-/// one would otherwise draw a second dot over the first. `flock` is released by
-/// the kernel when the process dies, so a crash cannot strand the lock — which
-/// is why it is used instead of a pid file or a distributed lock.
-private func acquireSingletonLock() -> Int32? {
+/// one would otherwise draw a second traffic light over the first. `flock` is
+/// released by the kernel when the process dies, so a crash cannot strand the
+/// lock — which is why it is a lock rather than a pid file.
+private func acquireSingletonLock() -> LockResult {
     let directory = ("~/Library/Application Support/dsh-status" as NSString).expandingTildeInPath
     try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
     let path = (directory as NSString).appendingPathComponent("light.lock")
     let descriptor = open(path, O_CREAT | O_RDWR, 0o644)
-    guard descriptor >= 0 else { return nil }
+    guard descriptor >= 0 else {
+        return .unavailable(String(cString: strerror(errno)))
+    }
     if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
         close(descriptor)
-        return nil
+        return .busy
     }
-    return descriptor
+    return .held(descriptor)
 }
 
 func runWindowMode(_ options: Options) {
-    guard let lock = acquireSingletonLock() else {
+    switch acquireSingletonLock() {
+    case .busy:
         FileHandle.standardError.write("DSHLight: another light is already running\n".data(using: .utf8)!)
         exit(0)
+    case .unavailable(let reason):
+        // The descriptor stays open for the life of the process; the lock is
+        // released by the kernel, so there is nothing to close on purpose.
+        FileHandle.standardError.write("DSHLight: no lock (\(reason)); running without one\n".data(using: .utf8)!)
+    case .held:
+        break
     }
-    // Held until the process ends; never closed on purpose.
-    _ = lock
 
     let application = NSApplication.shared
     let delegate = AppDelegate(options: options)

@@ -15,6 +15,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
+### Changed
+
+- **The dot is a traffic light.** Three lenses instead of one bulb, because three states were competing
+  for it and grey had to carry "rest": red is a feed that cannot be trusted, yellow is work, breathing
+  yellow is a session blocked on you, green is an unread finish, and **all three dark is rest** — which
+  is what a traffic light with nothing to say looks like. Blue is gone; a blocked session breathes the
+  yellow lens on a slow 2.6 s cycle, dipping to a quarter brightness rather than blinking, so it reads
+  as alive instead of as an alarm.
+- **The light docks to the nearest screen border** when dropped, and remembers which one. The right-click
+  list opens flush to that border, hanging inward, so an edge-docked light never opens a menu off the
+  edge of the screen.
+- **A right-click list**, built as groups so the next feature is one entry: style, orientation and a
+  reserved group between separators. A single column gives every row the same width.
+- **Appearance is two independent axes.** Style (classic macOS circles, or nostalgic bulbs in a housing)
+  and orientation (horizontal or vertical) combine freely, persist between runs, and can be overridden
+  with `--style` and `--orientation`.
+
+### Fixed
+
+- **A lock that cannot be opened no longer blocks the light.** The singleton lock read "could not create
+  the lock file" as "another light is running", so a confined or read-only environment refused to draw
+  at all. It now runs without one and says why.
+
+
 ## [0.4.0] - 2026-10-02
 
 ### Added

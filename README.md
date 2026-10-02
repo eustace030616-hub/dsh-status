@@ -43,15 +43,18 @@ while the other did not exist.
 
 **Renderer mapping**
 
-| What the renderer sees | Light |
+| State | Lenses |
 |---|---|
-| file missing/unparseable, no timestamp, or `now - updatedAt > 3 × heartbeatMs` | 🔴 red — *the feed is broken* |
-| `state: "working"` | 🟡 yellow |
-| `state: "waiting"` | 🟢 green — *the turn is over; nobody has looked yet* |
-| `state: "asking"` | 🔵 blue — *the agent is blocked on you: a permission or a question* |
-| `state: "idle"`, a legacy `"unknown"`, or **any value this build does not know** | ⚪ grey — *rest* |
+| rest (`idle`) | all three dark |
+| a session is working | yellow lit |
+| a session is blocked on you (`asking`) | **yellow breathing** — alive, not an alarm |
+| an unread finish (`waiting`) | green lit |
+| the feed cannot be trusted | red lit |
 
-
+A broken feed outranks everything, because nothing else can be said about it. The split between red and
+dark is the important one: **red means the feed itself cannot be trusted**, while dark means the feed is
+healthy and nothing is pending. A reader that meets a state it has never heard of rests rather than
+alarms, so adding one later cannot make an older renderer cry wolf.
 **With several sessions** the publisher reports each one in `meta.sessions` and the renderer
 aggregates, because only the renderer knows what you have already read:
 
@@ -167,12 +170,8 @@ replace**; it is live config and a malformed patch can stop DSH from starting:
 
 ## Stage 2 — the renderer
 
-`mac/` builds **DSHLight.app**: one dot that reads the state document and shows yellow (working),
-green (the turn is over and nobody has looked yet), grey (rest) or red (the feed itself is broken)
-above every window, on every Space, and over another application's fullscreen window. A green finish
-settles to grey once you are back at DSH, because the reminder has been served. **Double-click it to
-move between DSH and where you were**; drag it to reposition, and it remembers where you left it. A
-single click is deliberately inert.
+`mac/` builds **DSHLight.app**: a three-lens traffic light. Three states used to compete for one bulb,
+and grey had to carry "rest"; with three lenses there is a place for everything.
 
 The plugin starts this for you when it mounts and stops it on dispose, so there is nothing to launch
 by hand. Build it only when working on it, and after changing the Swift run `npm run ship` to refresh
@@ -198,10 +197,30 @@ To follow the light in a terminal instead — printed once, then only when it ch
 | `--print` | follow in the terminal instead of drawing a window |
 | `--interval SECONDS` | poll interval, default `0.25` |
 | `--open PATH` | what a click opens, default `/Applications/DSH Desktop.app` |
+| `--style classic\|nostalgic` | appearance, overriding what was chosen last |
+| `--orientation horizontal\|vertical` | layout, overriding what was chosen last |
 | `--ack-app BUNDLE-ID` | another application whose return to the front settles a green; repeatable |
 | `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
 | `--size POINTS` | dot diameter, default `24` |
+
+The light **docks to whichever screen border is nearest** when dropped, and remembers which one. The
+right-click list opens flush to that same border, hanging inward, so an edge-docked light never opens a
+menu off the edge of the screen.
+
+```
+Style                          Orientation
+  ✓ Classic                      ✓ Horizontal
+    Nostalgic                      Vertical
+─────────────
+   (reserved for the next thing)
+─────────────
+Quit the light
+```
+
+Style and orientation are independent axes — every combination works — and both persist between runs,
+with `--style` and `--orientation` overriding them at launch. The separated group is where the next
+feature goes, and a single menu column gives every row the same width for free.
 
 Three properties worth keeping:
 
@@ -223,6 +242,10 @@ Three properties worth keeping:
   a green has been read is a fact about the viewer, not about the harness, so the last step can only
   happen where the eyes are. That is why `meta.sessions` exists and why the headline `state` is only a
   convenience for simple readers.
+- **One light only.** The renderer takes an exclusive `flock` for the life of its process, so the
+  plugin's instance and a hand-launched one cannot both draw. A lock that cannot even be *opened* is not
+  contention, so the light runs without one and says why — refusing to draw would be worse than a
+  possible duplicate.
 - **Being in DSH is what acknowledges.** The reminder exists to bring you here, so while you are here it
   has nothing left to do: green settles the moment DSH is in front, not only when you arrive from
   somewhere else. That also covers a finish landing while you are already looking at DSH, which a
