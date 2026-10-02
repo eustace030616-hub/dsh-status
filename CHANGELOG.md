@@ -42,6 +42,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **`--print` mode**, a persistent follower for inspecting the light without a window: it prints the
   current light at once, then only when the light or its reason changes. Colour is emitted only when
   stdout is a terminal.
+- `changedAt` in the state document: when the current state was asserted, as distinct from when the
+  publisher was last heard from.
 - Launch flags: `--state-file`, `--print`, `--interval`, `--open`, `--level`, `--size`.
 - **Acknowledgement by return.** A green finish settles to grey once the user is back at DSH — either
   by switching to it or by clicking the light — because the reminder has been served. The
@@ -52,6 +54,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **An acknowledgement expired one heartbeat after it was made.** `updatedAt` means "last heard from"
+  — the heartbeat moves it every couple of seconds — and the renderer compared an acknowledgement
+  against it as though it meant "when the state changed". Green therefore settled to grey and sprang
+  back two seconds later, which looked like typing had undone it. The contract now carries
+  **`changedAt`**, written only when a state is asserted and left alone by the heartbeat; the renderer
+  compares against that, and falls back to noticing the transition itself for a publisher that
+  predates the field.
 - **`--print` never saw the frontmost application change.** It slept between polls, and `NSWorkspace`
   delivers that change as a notification on the run loop, so the process kept reporting whatever was
   in front when it started — the acknowledgement would have shipped as a feature that silently did

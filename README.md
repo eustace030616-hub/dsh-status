@@ -34,7 +34,8 @@ while the other did not exist.
 | `state` | `idle` \| `working` \| `waiting`. |
 | `sessionId` | Session being reported on, or `null`. |
 | `title` | Session title, or `null` (see *Known gaps*). |
-| `updatedAt` | ms epoch. Re-stamped every `heartbeatMs` even when nothing changes. |
+| `updatedAt` | ms epoch. **When the publisher was last heard from.** Re-stamped every `heartbeatMs` even when nothing changes — that is what makes staleness work, and why it must never be read as a change time. |
+| `changedAt` | ms epoch. **When this state was last asserted.** Written on a publish and left alone by the heartbeat, so this — not `updatedAt` — is what an acknowledgement may be compared against. |
 | `heartbeatMs` | The publisher's cadence, so the renderer need not hardcode a staleness rule. |
 | `reason` | Which event caused this write: `init`, `session-start`, `prompt`, `turn-end`, `dispose`. Debugging only. |
 | `meta` | **Extension channel.** Additive; unknown keys must be ignored by readers. |
@@ -186,8 +187,10 @@ Three properties worth keeping:
   live sessions emits no agent event at all — verified by recording the state file across a switch,
   which showed the heartbeat ticking and *nothing* else being written. So the acknowledgement lives
   on the Mac, where the frontmost window is visible. It is stored in `UserDefaults`, shared by both
-  modes, and compared against the finish's `updatedAt` — a newer finish is green again rather than
-  being suppressed by an older acknowledgement. If you drive DSH in a browser rather than the desktop
+  modes, and compared against the finish's `changedAt` — a newer finish is green again rather than
+  being suppressed by an older acknowledgement. Against `updatedAt` it would expire on the next
+  heartbeat, which is exactly the bug this field exists to fix. A publisher too old to send
+  `changedAt` is handled by the renderer noticing the finish itself. If you drive DSH in a browser rather than the desktop
   app, add its bundle identifier: `--ack-app com.apple.Safari`, knowing that any return to Safari
   then counts as a return to DSH.
 - **No Apple account is needed.** The bundle is ad-hoc signed, which is enough for the kernel, and a

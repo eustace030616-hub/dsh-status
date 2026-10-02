@@ -55,9 +55,12 @@ struct Reading {
     var sessionId: String?
     /// Seconds since the publisher last wrote. `nil` when there is no file.
     var age: Double?
-    /// When that write happened. An acknowledgement is compared against this,
-    /// so a *new* finish is never swallowed by an older acknowledgement.
+    /// When that write happened. Only useful for staleness — the heartbeat
+    /// moves it every couple of seconds.
     var publishedAt: Date?
+    /// When this state was last *asserted*. This, not `updatedAt`, is what an
+    /// acknowledgement may be compared against: it survives the heartbeat.
+    var changedAt: Date?
     /// The heartbeat expired: the last state is no longer a claim about now.
     var stale = false
 
@@ -104,6 +107,7 @@ enum StateFile {
 
         let heartbeatMs = (object["heartbeatMs"] as? NSNumber)?.doubleValue ?? fallbackHeartbeatMs
         let updatedAtMs = (object["updatedAt"] as? NSNumber)?.doubleValue
+        let changedAtMs = (object["changedAt"] as? NSNumber)?.doubleValue
         let reason = object["reason"] as? String ?? "-"
         let sessionId = object["sessionId"] as? String
 
@@ -135,7 +139,8 @@ enum StateFile {
             detail: reason,
             sessionId: sessionId,
             age: age,
-            publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000)
+            publishedAt: Date(timeIntervalSince1970: updatedAtMs / 1000),
+            changedAt: changedAtMs.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }
 }
@@ -213,13 +218,42 @@ final class Acknowledgement {
     }
 }
 
+/// Watches for the moment a finish appears.
+///
+/// Needed for a publisher that predates `changedAt`, whose only timestamp is the
+/// heartbeat's. The reader then has to notice the transition itself. A heartbeat
+/// rewrites the file without changing the state, reason or session, so the
+/// identity below stays put and the observed moment does not drift.
+final class FinishTracker {
+    private var identity: String?
+    private var observedAt: Date?
+
+    /// When the current finish appeared, as far as this reader can tell.
+    func note(_ reading: Reading) -> Date? {
+        let current = "\(reading.light.rawValue)|\(reading.detail)|\(reading.sessionId ?? "-")"
+        if current != identity {
+            identity = current
+            observedAt = reading.light == .waiting ? Date() : nil
+        }
+        return observedAt
+    }
+}
+
 /// What to draw, once the acknowledgement is taken into account. A finish the
 /// user has already returned to is rest, not a reminder — but a *newer* finish
 /// is green again, because the acknowledgement is older than it.
-func displayed(_ reading: Reading, acknowledgedBy acknowledgement: Acknowledgement?) -> Reading {
-    guard reading.light == .waiting, acknowledgement?.covers(reading.publishedAt) == true else {
-        return reading
-    }
+///
+/// The comparison is against when the state was *asserted*, never against
+/// `updatedAt`: the heartbeat moves that one every couple of seconds, and an
+/// acknowledgement measured against it expires on the very next beat.
+func displayed(
+    _ reading: Reading,
+    acknowledgedBy acknowledgement: Acknowledgement?,
+    finishObservedAt: Date?
+) -> Reading {
+    guard reading.light == .waiting else { return reading }
+    guard let finishAt = reading.changedAt ?? finishObservedAt else { return reading }
+    guard acknowledgement?.covers(finishAt) == true else { return reading }
     var settled = reading
     settled.light = .idle
     settled.detail = "\(reading.detail) · back in dsh"
@@ -342,10 +376,12 @@ func runPrintMode(_ options: Options) {
         print("resting when these come to the front: \(acknowledgement.targetDescription)")
         print("frontmost now: \(front)")
     }
+    let finishes = FinishTracker()
     var previous: String?
     while true {
         acknowledgement?.poll()
-        let reading = displayed(StateFile.read(at: options.statePath), acknowledgedBy: acknowledgement)
+        let raw = StateFile.read(at: options.statePath)
+        let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
         if reading.signature != previous {
             previous = reading.signature
             var line = "\(reading.label) · \(reading.detail)"
@@ -437,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var view: DotView?
     private var timer: Timer?
+    private let finishes = FinishTracker()
     private lazy var acknowledgement: Acknowledgement? = options.ackDisabled
         ? nil
         : Acknowledgement(targets: options.ackTargets, fallbackAppPath: options.openTarget)
@@ -494,7 +531,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refresh() {
         guard let view else { return }
         acknowledgement?.poll()
-        let reading = displayed(StateFile.read(at: options.statePath), acknowledgedBy: acknowledgement)
+        let raw = StateFile.read(at: options.statePath)
+        let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
         // Redraw only when the colour actually changes: the dot is idle most of
         // the time, and the reading itself changes every heartbeat tick.
         if reading.light != view.reading.light {

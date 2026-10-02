@@ -155,6 +155,20 @@ await check('a second prompt flips back to working', async () => {
   assert.equal(read().state, 'working')
 })
 
+await check('a real change moves changedAt, and repeating the same state does not', async () => {
+  const before = read()
+  await sleep(5)
+  await fire(main, 'agent/turn-stopping', { agent: ROOT, turn: 9 })
+  const after = read()
+  assert.equal(after.state, 'waiting')
+  assert.ok(after.changedAt > before.changedAt, 'changedAt did not move on a real change')
+  assert.equal(after.changedAt, after.updatedAt, 'a publish stamps both timestamps')
+
+  await sleep(5)
+  await fire(main, 'agent/turn-stopping', { agent: ROOT, turn: 9 })
+  assert.equal(read().changedAt, after.changedAt, 'a repeated identity must keep changedAt')
+})
+
 const beat = makeCtx()
 const beatPath = join(root, 'beat', 'state.json')
 apply(beat.ctx, { statePath: beatPath, heartbeatMs: 250 })
@@ -166,6 +180,11 @@ await check('heartbeat: re-stamps the timestamp without changing the state', asy
   const second = readBeat()
   assert.equal(second.state, 'idle')
   assert.ok(second.updatedAt > first.updatedAt, 'the heartbeat did not advance updatedAt')
+  assert.equal(
+    second.changedAt,
+    first.changedAt,
+    'the heartbeat moved changedAt — an acknowledgement would expire one beat after it was made'
+  )
 })
 
 await check('a mid-turn mount latches the session from turn-stopping alone', async () => {
