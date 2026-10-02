@@ -15,6 +15,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A `Secrets` section in the README**, recording how the API key is kept out of this project: the value
+  is resolved at request time through the credential seam and never stored, `describe()` answers "is a key
+  configured?" without a value, error bodies are mapped to codes because the provider's own 401 echoes key
+  fragments, the key never reaches a child process, and the tests inject a canary secret and assert it
+  surfaces nowhere. It also records the rule for working on the code, which is the part that gets
+  forgotten: never print a credential value, describe it by existence, source and length, and rotate one
+  that escapes rather than trying to scrub the transcript.
+
 ## [0.6.4] - 2026-10-02
 
 ### Changed

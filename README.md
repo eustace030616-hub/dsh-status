@@ -368,6 +368,34 @@ Two layers, deliberately separated because they prove different things:
 
 Both run against real files in a temp directory. Neither needs DSH, a network, or an API key.
 
+## Secrets
+
+This project never handles the API key. The plugin knows the **name** `DEEPSEEK_API_KEY` and nothing else:
+
+- **The value is resolved at request time**, through the harness's credential seam —
+  `await ctx.credentials.resolve('DEEPSEEK_API_KEY')` — and lives in one local for the length of one
+  request. Nothing stores it, and a rotated key reaches the next request with no restart.
+- **Existence is asked with `describe()`**, which reports `{configured, source}` and by design never
+  returns the value. Any surface that only needs to know *whether* a key is set uses that one.
+- **The published document is plain JSON on disk.** Numbers go in it; the key never does. The renderer is
+  a reader with no network and no credentials, and it receives figures rather than secrets.
+- **Error bodies are not kept.** DeepSeek's own 401 echoes part of the key it rejected — `your api key:
+  ****abcd is invalid` — so a failure is mapped to a code such as `unauthorized` or `offline`, and the
+  body is dropped rather than logged. (The fragment above is a placeholder, deliberately: writing a real
+  one into this file would be the very mistake the section is about.)
+- **The key is never passed to a child process.** Process arguments are readable by anything running as
+  the same user (`ps`), which is why the renderer is handed a file and not a credential.
+- **Tests inject the resolver and the HTTP client**, hand them a canary secret, and assert the canary
+  appears nowhere: not in the published document, not in a log line, not in `process.argv`. That is what
+  makes "the key stays out" a test rather than a promise.
+
+The same rule applies to working on it, which is the part that actually gets forgotten: **never print a
+credential value** — not out of the store, not out of a config file, not out of an error message. Inspect
+a credentials file with every value masked, and describe one by existence, source and length. When a
+value is genuinely needed, read and use it inside the single process that needs it, so it never reaches
+command arguments or output. If one does escape, say so plainly and rotate it through the seam
+(`ctx.credentials.set(ref, …)`) rather than trying to scrub the transcript.
+
 ## Known gaps
 
 - **The prompt → `working` path is confirmed live; the turn end is not.** Installing through the
