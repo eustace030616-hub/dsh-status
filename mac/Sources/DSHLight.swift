@@ -969,7 +969,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// because the menu is placed against the same one.
     private func dock() {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
-        let visible = screen.visibleFrame
+        let visible = usableFrame(of: screen)
         border = borderToAdopt(for: window.frame, in: visible)
         let want = LightGeometry.of(style).size(border.orientation)
 
@@ -1006,6 +1006,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set([origin.x, origin.y], forKey: Self.originKey)
     }
 
+    /// Where a window may sit on a screen: its visible frame, with the menu bar
+    /// reserved even when the system reports it as hidden.
+    ///
+    /// With "automatically hide and show the menu bar" on, `visibleFrame` covers
+    /// the whole screen — measured here as 1680x1050 against a 1680x1050 screen
+    /// frame — so a light docked to the top edge sat inside the bar's strip and
+    /// the bar dropped on top of it. `NSStatusBar.thickness` is the bar's height
+    /// and the only public way to ask for it.
+    private func usableFrame(of screen: NSScreen) -> NSRect {
+        var frame = screen.visibleFrame
+        let menuBar = max(NSStatusBar.system.thickness, 24)
+        let alreadyReserved = screen.frame.maxY - frame.maxY
+        if alreadyReserved < menuBar {
+            frame.size.height = max(0, frame.height - (menuBar - alreadyReserved))
+        }
+        return frame
+    }
+
     /// The border a drop should adopt: the nearest one, unless the drop is in a
     /// corner — where the light keeps the direction it already had.
     ///
@@ -1037,13 +1055,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return defaultOrigin(size: size)
         }
         let candidate = NSRect(x: saved[0], y: saved[1], width: size.width, height: size.height)
-        let visible = NSScreen.screens.contains { $0.visibleFrame.intersects(candidate) }
+        let visible = NSScreen.screens.contains { usableFrame(of: $0).intersects(candidate) }
         return visible ? candidate.origin : defaultOrigin(size: size)
     }
 
     /// Top-right of the main screen's visible frame, clear of the menu bar.
     private func defaultOrigin(size: NSSize) -> NSPoint {
-        guard let frame = NSScreen.main?.visibleFrame else { return NSPoint(x: 40, y: 40) }
+        guard let screen = NSScreen.main else { return NSPoint(x: 40, y: 40) }
+        let frame = usableFrame(of: screen)
         return NSPoint(
             x: frame.maxX - size.width - Self.dockInset,
             y: frame.maxY - size.height - Self.dockInset

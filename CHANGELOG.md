@@ -15,6 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-10-02
+
+### Fixed
+
+- **A light docked to the top edge sat inside the menu bar.** With "automatically hide and show the menu
+  bar" on, `NSScreen.visibleFrame` covers the whole screen — measured here as 1680×1050 against a
+  1680×1050 frame — so docking 10 points from the top put the light exactly where the bar drops. The
+  usable area now reserves `NSStatusBar.thickness` worth of menu bar whether or not the system reports it
+  as hidden, so a top-docked light sits clear of the bar instead of under it.
+
+## [0.5.5] - 2026-10-02
+
 ## [0.5.5] - 2026-10-02
 
 ### Fixed
