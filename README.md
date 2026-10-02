@@ -269,19 +269,25 @@ the light wait with it, which is the one outcome this project cannot accept.
 
 **The account group is real, and filling it is the plugin's work rather than the renderer's.** The
 publisher makes one authenticated `GET https://api.deepseek.com/user/balance` every `balanceMs` and puts the
-answer in `meta.account`; the renderer draws whatever it finds there — one folded group per currency,
-because the endpoint can answer in more than one, with a footer saying how old the answer is. The renderer
+answer in `meta.account`; the renderer draws whatever it finds there — one folded group per currency that
+actually holds something, with `Top up now` and a footer saying how old the answer is. The endpoint answers in
+every currency the account has ever touched, so a currency sitting at zero is a row that says nothing and is
+not listed; a figure that cannot be read is *not* treated as zero, because an unreadable amount should be
+shown rather than hidden. `Top up now` opens the platform's own top-up page — the destination DSH's account
+service publishes for the same purpose, not a URL invented here — and it is offered whether or not the balance
+could be read. The renderer
 holds no key and makes no requests, which is why a balance it cannot read is a dim reason rather than a
 number it guessed:
 
 ```
 Account ▸
-  CNY ▸                          USD ▸
-    Total      14.58               Total       0.00
-    Granted     0.00               Granted     0.00
-    Topped up  14.58               Topped up   0.00
+  CNY ▸
+    Total      12.76
+    Granted     0.00
+    Topped up  12.76
   ─────────────
-  updated 4m ago
+  Top up now
+  updated 3m ago
 ```
 
 A failure is a **code, not a message** — `no-key`, `unauthorized`, `offline`, `timeout`, `http-503`,

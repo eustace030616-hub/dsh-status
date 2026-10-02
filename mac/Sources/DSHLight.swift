@@ -981,6 +981,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// full strength: thirty percent fainter, so it reads as a hint of a body
     /// rather than as a panel with a light standing in it.
     private static let bodyOpacity: CGFloat = 0.7
+    /// The platform's top-up page: the same destination DSH's own account service
+    /// publishes for this (`/top_up` against the platform origin), so the list is
+    /// not inventing a URL that could drift from the product's.
+    private static let topUpURL = URL(string: "https://platform.deepseek.com/top_up")
+
     /// How far above the point passed to `popUp` the top of the list lands.
     ///
     /// Measured, not documented: a menu is placed by its top-left corner, and
@@ -1313,9 +1318,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// makes no requests, so a balance it cannot read is a dash and a reason
     /// rather than a number it guessed.
     ///
-    /// One folded group per currency, because the endpoint answers in more than
-    /// one, and a footer saying how old the answer is — hours-old figures should
-    /// not read like current ones. Nothing here can change a bulb.
+    /// One folded group per currency the account actually holds something in —
+    /// the endpoint answers in every currency the account has ever touched, and a
+    /// currency sitting at zero is a row that says nothing. Then the way out when
+    /// nothing is left, and a footer saying how old the answer is, because
+    /// hours-old figures should not read like current ones. Nothing here can
+    /// change a bulb.
     private func accountMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -1324,8 +1332,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(note("no source wired up yet"))
             return menu
         }
-        for figures in account.figures {
+        let held = account.figures.filter { !isZero($0.total) }
+        for figures in held {
             menu.addItem(folded(figures.currency, currencyMenu(figures)))
+        }
+        if held.isEmpty, !account.figures.isEmpty {
+            menu.addItem(note("every balance is zero"))
         }
         if let reason = account.reason {
             menu.addItem(note(reasonText(reason)))
@@ -1334,8 +1346,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(note("not enough balance for api calls"))
         }
         menu.addItem(.separator())
+        menu.addItem(topUp())
         menu.addItem(note(freshness(account)))
         return menu
+    }
+
+    /// The row that opens the platform's own top-up page.
+    ///
+    /// The destination is not invented here: DSH's account service publishes
+    /// exactly this link for exactly this purpose — `/top_up` against the
+    /// platform origin. It is offered whether or not the balance is readable,
+    /// because "I cannot read your balance" is no reason to leave someone with no
+    /// way to add to it.
+    private func topUp() -> NSMenuItem {
+        let item = NSMenuItem(title: "Top up now", action: #selector(openTopUp), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = true
+        return item
+    }
+
+    @objc private func openTopUp() {
+        guard let url = Self.topUpURL else { return }
+        if !NSWorkspace.shared.open(url) {
+            FileHandle.standardError.write("DSHLight: cannot open \(url)\n".data(using: .utf8)!)
+        }
+    }
+
+    /// Whether a figure the provider sent is zero, however it was written:
+    /// `"0"`, `"0.00"`, `"0.000000"`. A figure that cannot be read is **not**
+    /// treated as zero — an amount we cannot parse is shown rather than hidden.
+    private func isZero(_ figure: String) -> Bool {
+        guard let amount = Decimal(string: figure, locale: Locale(identifier: "en_US_POSIX")) else {
+            return false
+        }
+        return amount == 0
     }
 
     private func currencyMenu(_ figures: AccountFigures) -> NSMenu {

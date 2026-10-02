@@ -15,6 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-02
+
+### Changed
+
+- **A currency with nothing in it is no longer listed.** The endpoint answers in every currency the account
+  has ever touched, so an unused one was a folded group of three zeroes saying nothing. A currency is listed
+  when its `total` is not zero, however the provider wrote that zero; when the filter leaves nothing at all,
+  a single dim row says so. A figure that cannot be read is **not** treated as zero — an unreadable amount is
+  shown rather than hidden.
+- **`Top up now` opens the platform's top-up page**, above the freshness footer. The destination is the one
+  DSH's own account service publishes for this (`/top_up` against the platform origin) rather than a URL
+  invented here, and the row is offered whether or not the balance could be read: being unable to read a
+  balance is no reason to leave someone with no way to add to it.
+
 ## [0.7.2] - 2026-10-02
 
 ### Fixed
