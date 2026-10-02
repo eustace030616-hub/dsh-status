@@ -241,11 +241,13 @@ Account    ▸
 Quit the light
 
 Appearance ▸                    Account ▸
-  Size   ●━━━━━━━━━━  21 pt       Balance       —
-  Gap    ●━━━━━━━━━━   7 pt       Today         —
-  Rest   ●━━━━━━━━━━  33%         This month    —
-  Lit    ●━━━━━━━━━━  85%         ─────────────
-                                  no source wired up yet
+  Size   ●━━━━━━━━━━  20 pt       CNY ▸
+  Gap    ●━━━━━━━━━━   8 pt         Total      12.62
+  Rest   ●━━━━━━━━━━  28%           Granted     0.00
+  Lit    ●━━━━━━━━━━  85%           Topped up  12.62
+  ─────────────                   ─────────────
+  Reset to default                Top up now
+                                  updated 2m ago
 ```
 
 **The list is a list of lists.** Almost everything worth putting in it is a thing with several numbers
@@ -254,7 +256,10 @@ level stays down to what the light can say at a glance. Everything is folded by 
 inside are whatever the light is wearing now.
 
 **The light is four numbers, and the appearance group is where they are set.** One slider each for the
-size of a lens, the gap between the lenses, and how solid a resting and a lit lens are. Every slider
+size of a lens, the gap between the lenses, and how solid a resting and a lit lens are, and a `Reset to
+default` row beneath them — four sliders with no way back is a one-way door, and the values a fresh install
+wears are not something anyone should have to remember. The reset is one assignment through the same path a
+slider takes, so the window is re-fitted and the change is remembered exactly as a drag would be. Every slider
 applies **as it is dragged** — the window is re-fitted and re-anchored on each step, so the light on screen
 is the preview rather than a change that lands when the list closes. The values are remembered between
 runs, and `--size` overrides the size slider for a single run.

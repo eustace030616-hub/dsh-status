@@ -657,7 +657,7 @@ struct Look {
     /// preferences of the light they were chosen on — a new install should look
     /// like the approved light, not like a different object. The body's opacity
     /// is the one that has no slider: see `bodyOpacity`.
-    static let standard = Look(lens: 20, gap: 8, restAlpha: 0.15, litAlpha: 0.85)
+    static let standard = Look(lens: 20, gap: 8, restAlpha: 0.28, litAlpha: 0.85)
 
     /// The two styles this build used to have, read once and translated into
     /// slider values: whoever was on the 22-point flat light keeps a 22-point
@@ -1346,7 +1346,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.isEnabled = true
             menu.addItem(item)
         }
+        // A way back. Four sliders with no undo is a one-way door, and the
+        // numbers that are the default are not something anyone should have to
+        // remember — they are what a fresh install wears.
+        menu.addItem(.separator())
+        menu.addItem(choice("Reset to default", on: false, action: #selector(resetLook), tag: 0))
         return menu
+    }
+
+    /// Put the light back to what a fresh install wears.
+    ///
+    /// It is one assignment through the same path a slider uses, so the window is
+    /// re-fitted, the change is remembered, and there is no second way for the
+    /// look to be set that could drift from the first.
+    @objc private func resetLook() {
+        applyLook { $0 = Look.standard }
     }
 
     /// An account list. The figures come from the publisher's `meta.account`,

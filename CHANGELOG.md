@@ -15,6 +15,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-10-02
+
+### Added
+
+- **`Reset to default` in the appearance group.** Four sliders with no way back is a one-way door, and the
+  values a fresh install wears are not something anyone should have to remember. It is one assignment through
+  the same path a slider takes, so the window is re-fitted, the result is remembered, and there is no second
+  way for the look to be set that could drift from the first. Verified by dispatching the row through AppKit's
+  own action machinery: a light stored at 44 pt / 22 pt gap / 55% / 25% came back to 20 / 8 / 28% / 85%, with
+  the window re-fitted to match.
+
+### Changed
+
+- **A fresh install now wears 20 pt lenses, an 8 pt gap, 28% rest and 85% lit** — the numbers the light has
+  been dialled to, read off its preferences again as they were tuned. Remembered values still win, so existing
+  installs are untouched: this is what `Reset to default` restores, and what a new install starts from.
+
 ## [0.7.5] - 2026-10-02
 
 ### Changed
