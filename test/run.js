@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -657,6 +657,33 @@ await check('balance: no credential service costs the account, not the light', a
     assert.equal(doc.state, 'idle')
     assert.equal(doc.reason, 'init')
     assert.equal(mounted.scheduled.length, 0, 'the child never scheduled a lookup either')
+  } finally {
+    mounted.restore()
+  }
+})
+
+await check('balance: a click on the list is served on the next heartbeat', async () => {
+  // The daemon's only write: a request file beside the document. The account's
+  // own cadence is under test control here, so anything beyond the first lookup
+  // can only have come from the request.
+  const mounted = mountWithBalance({ response: answerFor(200, BALANCE_BODY) })
+  const requestPath = `${mounted.path}.refresh`
+  try {
+    await sleepReal(25)
+    assert.equal(mounted.calls.length, 1, 'the mount makes one lookup of its own')
+
+    writeFileSync(requestPath, '')
+    await sleepReal(400) // heartbeatMs is 250, so a beat has passed
+    assert.equal(mounted.calls.length, 2, 'the request was not served')
+
+    // The same request is not served twice: the file is left in place by the
+    // daemon, and only a newer one counts.
+    await sleepReal(400)
+    assert.equal(mounted.calls.length, 2, 'one request must be served once')
+
+    writeFileSync(requestPath, '')
+    await sleepReal(400)
+    assert.equal(mounted.calls.length, 3, 'a newer request is a new request')
   } finally {
     mounted.restore()
   }

@@ -15,24 +15,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-02
+
+### Added
+
+- **A balance you can ask for again, from the light.** The row that shows a figure is a control now: clicking
+  `CNY ↻` touches `<statePath>.refresh`, and the publisher serves it on its next heartbeat — two seconds at
+  most, against the five-minute cadence it would otherwise wait for. This is the **one thing the daemon has
+  ever written**, and the only way the feature can exist: the daemon holds no key, makes no requests, and
+  there is no socket between the halves. The publisher drops its pending timer, starts its backoff again from
+  the floor, and ignores a request that arrives while a lookup is in flight. Verified in `test/run.js`: one
+  request is served once, a later touch is a new request, and the account's own (captured) cadence never fires
+  in between.
+- **Red breathing when the balance runs out.** Under the threshold (`--low-balance`, default 8, judged in the
+  currency holding the most), or when the provider says the balance will not cover a call, the red lens
+  pulses — the same 30% → 100% over 1.3 s the blocked yellow uses. Red therefore means two things, told apart
+  by the pulse: **steady is the feed, breathing is the account**. A session blocked on you still outranks it,
+  and `--low-balance 0` turns it off. Measured on the rendered view: the red lens sweeps 0.302 → 1.000 for a
+  low balance and stays at 0.851 for a dead feed.
+- **A single click says what the light means**, in a small panel beside it that fades after 2.4 s:
+  `balance low — CNY 5.00`, `working — prompt`, `ready — finished, unread`, `blocked on you — a permission or
+  a question`, `no signal — stale (heartbeat 2.0s)`, `idle — nothing pending`. It waits out the double-click
+  window first, so the other gesture still just navigates, and the panel takes no clicks and never activates.
+
 ### Changed
 
-- **The README is a third of what it was: 488 → 186 lines.** Install is one line — paste
-  `github:eustace030616-hub/traffic-light` into the plugin page and restart — and the clone-and-mount-by-path
-  fallback is a clause rather than a section. Usage, the data path, the document, the transitions, the config
-  and the daemon each keep their table or diagram and lose the prose around it. The design rationale and the
-  war stories behind each constant moved out of the README and into this changelog, where they were written.
-- Also gone or merged: the duplicate colour mapping (Usage is the only one), the `--print` character legend,
-  the second drawing of the expanded list, and two red-versus-dark bullets now one. "The renderer" is "the
-  daemon" throughout, and the contract example no longer carries a real session id and home path.
+- The daemon's "it only ever reads" became "it reads the document, and writes exactly one request file" —
+  said plainly in the README, because it is the first thing this process has ever written.
+- README: the usage table gained red-pulsing and the click message, the flags gained `--low-balance`, and the
+  data-path drawing shows the request file.
+- **The README itself was cut to a third — 488 → 186 lines.** Install is two code blocks and two lines: paste
+  the repository into the plugin page, and the daemon needs no installation of its own (`git clone` then
+  `open bin/DSHLight.app` is the whole by-hand route). Usage, the data path, the document, the transitions,
+  the config and the daemon each keep their table or diagram and lose the prose around them; the rationale and
+  the war stories moved here, where they were written. The duplicate colour mapping, the `--print` character
+  legend and the second drawing of the list are gone, "the renderer" is "the daemon" throughout, and the
+  contract example no longer carries a real session id and home path.
 - The turn-end → `waiting` write, listed for several releases as unobserved, is now observed live: the state
   file went `working / prompt` → `waiting / turn-end` at 23:15:08, and the next prompt overwrote it, exactly
-  as the heartbeat model predicts. That Known-gap bullet is gone, and `agent/status: idle` remains the seam
-  that covers the endings `turn-stopping` misses.
-- **Install is two code blocks and two lines.** What the plugin page needs, that the daemon needs no
-  installation of its own and how to run it by hand. The manager's `dsh.bundle` behaviour, the HMR/restart
-  explanation and the clone-by-path script are not in the README — the first two are the plugin manager's
-  own documentation, and `scripts/install.sh --help` explains itself.
+  as the heartbeat model predicts. That Known-gap bullet is gone.
 
 ## [0.7.14] - 2026-10-02
 

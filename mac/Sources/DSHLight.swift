@@ -21,10 +21,13 @@ import Darwin
 
 /// What the light can show.
 ///
-/// Three of these are states the publisher reports; `broken` is not — it is the
-/// renderer saying *the feed itself* cannot be trusted (no file, unreadable,
-/// stale). Keeping "I cannot tell" apart from "nothing is happening" is the
-/// whole point: a session switch is rest, not an alarm.
+/// Four of these are states the publisher reports. Two are not, and both are the
+/// renderer's own reading of the document: `broken` says *the feed itself* cannot
+/// be trusted (no file, unreadable, stale), and `low` says the account is running
+/// out. Keeping "I cannot tell" apart from "nothing is happening" is the whole
+/// point — a session switch is rest, not an alarm — and both derived states are
+/// red, told apart by the pulse: red breathing is the account, red steady is the
+/// feed.
 enum Light: String {
     case idle
     case working
@@ -32,6 +35,9 @@ enum Light: String {
     /// The agent is blocked on the user: a permission or a question.
     case asking
     case broken
+    /// The balance is under the threshold, or the provider says it will not cover
+    /// a call. Not an error — the feed is fine and the agent is fine.
+    case low
 
     /// Fold a published `state` onto a light. Anything unrecognised becomes
     /// `idle`, never `broken`, so adding a state later can never make an older
@@ -121,6 +127,7 @@ struct Reading {
         case .waiting: return "🟢"
         case .asking: return "🔵"
         case .broken: return "🔴"
+        case .low: return "🟠"
         }
     }
 
@@ -131,6 +138,7 @@ struct Reading {
         case .waiting: return "waiting"
         case .asking: return "asking"
         case .broken: return "no signal"
+        case .low: return "balance low"
         }
     }
 }
@@ -396,9 +404,37 @@ final class FinishTracker {
     }
 }
 
-/// What to draw, once the acknowledgement is taken into account. A finish the
-/// user has already returned to is rest, not a reminder — but a *newer* finish
-/// is green again, because the acknowledgement is older than it.
+/// Below this, the light turns red and breathes. Eight, by the choice of the
+/// person who uses it; `--low-balance 0` turns the reminder off.
+let defaultLowBalance = Decimal(8)
+
+/// One figure as a number, or nil when the provider wrote something unreadable.
+func amount(_ figure: String) -> Decimal? {
+    Decimal(string: figure, locale: Locale(identifier: "en_US_POSIX"))
+}
+
+/// The currency whose balance is worth warning about: the one holding the most,
+/// because that is the money being spent. A figure that cannot be read is skipped
+/// rather than read as zero — an unreadable amount is not a small one.
+func primaryFigures(of account: Account) -> AccountFigures? {
+    account.figures
+        .compactMap { figures in amount(figures.total).map { (figures, $0) } }
+        .max { $0.1 < $1.1 }?
+        .0
+}
+
+/// Whether the account needs a reminder: under the threshold, or refused by the
+/// provider because it will not cover a call. A threshold of zero disables it.
+func isLow(_ account: Account?, _ threshold: Decimal) -> Bool {
+    guard let account, threshold > 0 else { return false }
+    if account.isAvailable == false { return true }
+    guard let figures = primaryFigures(of: account), let total = amount(figures.total) else { return false }
+    return total < threshold
+}
+
+/// What to draw, once the acknowledgement and the account are taken into account.
+/// A finish the user has already returned to is rest, not a reminder — but a
+/// *newer* finish is green again, because the acknowledgement is older than it.
 ///
 /// The comparison is against when the state was *asserted*, never against
 /// `updatedAt`: the heartbeat moves that one every couple of seconds, and an
@@ -406,10 +442,33 @@ final class FinishTracker {
 func displayed(
     _ reading: Reading,
     acknowledgedBy acknowledgement: Acknowledgement?,
-    finishObservedAt: Date?
+    finishObservedAt: Date?,
+    lowBalance threshold: Decimal = defaultLowBalance
 ) -> Reading {
     guard reading.light != .broken else { return reading }
 
+    let settled = settledLight(
+        reading,
+        acknowledgedBy: acknowledgement,
+        finishObservedAt: finishObservedAt
+    )
+
+    // The account is the one reminder that is not about the agent. It is red, and
+    // the *pulse* is what tells it apart from a feed that cannot be trusted — a
+    // standing condition that has to be noticed, against a failure. A session
+    // blocked on the user still outranks it: that one cannot proceed at all.
+    if settled.light != .asking, isLow(settled.account, threshold) {
+        return shown(settled, as: .low, why: "balance low")
+    }
+    return settled
+}
+
+/// The light for the sessions alone, before the account is considered.
+func settledLight(
+    _ reading: Reading,
+    acknowledgedBy acknowledgement: Acknowledgement?,
+    finishObservedAt: Date?
+) -> Reading {
     // Several sessions can be live at once, and the publisher reports all of
     // them. The aggregation happens here because an acknowledgement is a fact
     // about the viewer and only this side has it. Most urgent first:
@@ -464,6 +523,8 @@ struct Options {
     var ackTargets: Set<String> = []
     /// Set by --no-ack: green is kept until the publisher says otherwise.
     var ackDisabled = false
+    /// Below this balance the light turns red and breathes. Zero turns it off.
+    var lowBalance = defaultLowBalance
 
     static let usage = """
     DSHLight — a traffic light for DeepSeek Harness.
@@ -473,19 +534,23 @@ struct Options {
           change. Ctrl-C to stop.
 
       DSHLight [--state-file PATH] [--open APP] [--ack-app BUNDLE-ID] [--no-ack]
-               [--level LEVEL] [--size POINTS]
+               [--level LEVEL] [--size POINTS] [--low-balance POINTS]
           Draw the light above every window, on every Space, over fullscreen
           apps. It is a traffic light: three lenses stacked, red at the top. It
           docks to the nearest side of the screen when you drop it, and slides
           up and down that side until you drop it again.
           DOUBLE-CLICK switches between DSH and the application you came from,
-          whatever is lit. RIGHT-CLICK opens the list. Dragging docks it
-          elsewhere, and a single click does nothing on purpose.
+          whatever is lit. RIGHT-CLICK opens the list. A SINGLE CLICK says what
+          the light means, and goes away by itself. Dragging docks it elsewhere.
           LEVEL is floating, status or screensaver (default screensaver).
           The list holds one slider each for the size of a lens, the gap
           between them, and how solid a resting and a lit lens are. Every
           slider applies as it is dragged and is remembered afterwards.
+          Clicking a currency row asks the publisher for a fresh balance.
           --size POINTS overrides the size slider for this run only.
+          --low-balance POINTS sets when the light turns red and breathes for a
+          balance running out (default 8, in the currency holding the most; 0
+          turns the reminder off).
 
           A finish rests as soon as DSH is in front: you are looking at it, so
           the reminder has done its job. A session blocked on you pulses the
@@ -517,6 +582,8 @@ struct Options {
                 if let raw = value(), let seconds = Double(raw), seconds > 0 { options.interval = seconds }
             case "--size":
                 if let raw = value(), let points = Double(raw) { options.lens = CGFloat(points) }
+            case "--low-balance":
+                if let raw = value(), let points = Decimal(string: raw) { options.lowBalance = points }
             case "--ack-app":
                 if let identifier = value() { options.ackTargets.insert(identifier) }
             case "--no-ack":
@@ -554,6 +621,7 @@ private func coloured(_ text: String, _ light: Light) -> String {
     case .waiting: code = "32"  // green
     case .asking: code = "34"  // blue
     case .broken: code = "31"  // red
+    case .low: code = "31"  // red: the same lens, pulsing instead of steady
     }
     return "\u{001B}[\(code)m\(text)\u{001B}[0m"
 }
@@ -598,7 +666,12 @@ func runPrintMode(_ options: Options) {
             print("  \(clickLine)")
         }
         let raw = StateFile.read(at: options.statePath)
-        let reading = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
+        let reading = displayed(
+            raw,
+            acknowledgedBy: acknowledgement,
+            finishObservedAt: finishes.note(raw),
+            lowBalance: options.lowBalance
+        )
         if reading.signature != previous {
             previous = reading.signature
             var line = "\(reading.label) · \(reading.detail)"
@@ -761,6 +834,8 @@ final class TrafficLightView: NSView {
     var onTap: (() -> Void)?
     var onMove: ((NSPoint) -> Void)?
     var onMenu: (() -> Void)?
+    /// A single click, once it is clear no second one is coming.
+    var onNotice: (() -> Void)?
 
     private var originAtDragStart: NSPoint?
     private var mouseAtDragStart: NSPoint?
@@ -793,8 +868,10 @@ final class TrafficLightView: NSView {
         breathTimer?.invalidate()
     }
 
+    /// Whether the lit lens is pulsing. Two states pulse, and they are the two
+    /// that cannot wait: a session blocked on you, and a balance running out.
     private var needsBreathing: Bool {
-        reading.light == .asking
+        reading.light == .asking || reading.light == .low
     }
 
     /// A redraw clock that runs only while something is pulsing.
@@ -813,9 +890,9 @@ final class TrafficLightView: NSView {
     }
 
     /// How far into the pulse we are: 0 at the trough, 1 at the crest. A lens
-    /// that is not pulsing sits at 1 — full solidity, nothing animating.
+    /// that is not pulsing — or is not the lit one — sits at 1.
     private func level(for lens: Lens) -> Double {
-        guard lens == .yellow, needsBreathing else { return 1 }
+        guard needsBreathing, lens == litLens() else { return 1 }
         let phase = Date().timeIntervalSince(breathEpoch)
             .truncatingRemainder(dividingBy: Self.breathPeriod) / Self.breathPeriod
         return 0.5 + 0.5 * sin(2 * .pi * phase)
@@ -828,7 +905,7 @@ final class TrafficLightView: NSView {
     /// a slider set above the peak raises it, and the floor follows only if the
     /// slider is set below the floor.
     private func solidity(of lens: Lens, level: Double) -> Double {
-        guard lens == .yellow, needsBreathing else { return Double(look.litAlpha) }
+        guard needsBreathing, lens == litLens() else { return Double(look.litAlpha) }
         let peak = max(Double(look.litAlpha), Self.breathPeak)
         let floor = min(Self.breathFloor, peak)
         return floor + (peak - floor) * level
@@ -838,7 +915,7 @@ final class TrafficLightView: NSView {
     /// traffic light with nothing to say looks like.
     private func litLens() -> Lens? {
         switch reading.light {
-        case .broken: return .red
+        case .broken, .low: return .red
         case .asking, .working: return .yellow
         case .waiting: return .green
         case .idle: return nil
@@ -950,11 +1027,18 @@ final class TrafficLightView: NSView {
             needsDisplay = true
             onTap?()
         } else {
-            // First click: show that it arrived, then forget it.
+            // First click: show that it arrived, and — if no second click
+            // follows — say what the light means. Waiting for the partner gesture
+            // is what keeps a double-click from flashing a message on its way to
+            // navigating.
             pendingUntil = Date().addingTimeInterval(0.7)
             needsDisplay = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-                self?.needsDisplay = true
+                guard let self else { return }
+                self.needsDisplay = true
+                guard self.pendingUntil != nil else { return }
+                self.pendingUntil = nil
+                self.onNotice?()
             }
         }
     }
@@ -978,6 +1062,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The last reading, kept whole so the list can show the account: the view
     /// only needs the colour, but the account rides in the same document.
     private var reading: Reading = .broken("starting")
+    /// The message a single click shows, and the window it shows it in. Nil when
+    /// nothing is being said.
+    private var notice: NSWindow?
+    private var noticeHide: Timer?
+    /// The list while it is open, so a click inside it can close it.
+    private var openMenu: NSMenu?
+    /// Set when a request has to wait for the list to close before it can speak.
+    private var pendingNotice: String?
     /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
     /// How solid the grey body behind the lenses is, against the material's own
@@ -1083,6 +1175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.onTap = { [weak self] in self?.navigate() }
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
+        view.onNotice = { [weak self] in self?.sayWhatTheLightMeans() }
         container.addSubview(backdrop)
         container.addSubview(shade)
         container.addSubview(view)
@@ -1114,7 +1207,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let view else { return }
         acknowledgement?.poll()
         let raw = StateFile.read(at: options.statePath)
-        let next = displayed(raw, acknowledgedBy: acknowledgement, finishObservedAt: finishes.note(raw))
+        let next = displayed(
+            raw,
+            acknowledgedBy: acknowledgement,
+            finishObservedAt: finishes.note(raw),
+            lowBalance: options.lowBalance
+        )
         // Kept whether or not the colour moved: the account can change while the
         // light stays exactly as it is, and the list is built on demand.
         reading = next
@@ -1252,6 +1350,124 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    // MARK: The notice
+
+    /// What a single click says: the light in words, and the reason behind it.
+    ///
+    /// The colour answers *"should I go?"* at a glance; this answers *"why?"* for
+    /// the one moment someone asks. A broken feed is the only case that repeats its
+    /// detail, because there the reason *is* the actionable part.
+    private func noticeText() -> String {
+        switch reading.light {
+        case .low:
+            guard let account = reading.account,
+                  let figures = primaryFigures(of: account) else { return "balance low" }
+            return "balance low — \(figures.currency) \(figures.total)"
+        case .asking: return "blocked on you — a permission or a question"
+        case .working: return "working — \(reading.detail)"
+        case .waiting: return "ready — finished, unread"
+        case .idle: return "idle — nothing pending"
+        case .broken: return "no signal — \(reading.detail)"
+        }
+    }
+
+    /// A single click: say what the light means, and let it go.
+    private func sayWhatTheLightMeans() {
+        flash(noticeText())
+    }
+
+    /// Say what the light means, for a moment, beside it.
+    ///
+    /// A window of its own rather than a label inside the light: the light is
+    /// exactly as wide as a lens, and a message that widened it would move the
+    /// thing it is describing. It takes no clicks and never activates, so saying
+    /// something can never cost the gesture that comes next.
+    private func flash(_ text: String) {
+        guard let window else { return }
+        noticeHide?.invalidate()
+        notice?.orderOut(nil)
+
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .labelColor
+        label.sizeToFit()
+
+        let inset = NSSize(width: 10, height: 7)
+        let size = NSSize(
+            width: (label.frame.width + inset.width * 2).rounded(.up),
+            height: (label.frame.height + inset.height * 2).rounded(.up)
+        )
+        let body = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        body.material = .menu
+        body.blendingMode = .behindWindow
+        body.state = .active
+        body.wantsLayer = true
+        body.layer?.cornerRadius = 8
+        body.layer?.masksToBounds = true
+        label.setFrameOrigin(NSPoint(x: inset.width, y: inset.height))
+        body.addSubview(label)
+
+        let panel = NSWindow(
+            contentRect: NSRect(origin: noticeOrigin(size: size, near: window.frame, on: window), size: size),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = true
+        panel.level = window.level
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.contentView = body
+        panel.orderFrontRegardless()
+        notice = panel
+
+        let hide = Timer(timeInterval: 2.4, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.35
+                self.notice?.animator().alphaValue = 0
+            } completionHandler: {
+                self.notice?.orderOut(nil)
+                self.notice = nil
+            }
+        }
+        RunLoop.current.add(hide, forMode: .common)
+        noticeHide = hide
+    }
+
+    /// Where the message goes: beside the light, inward from the docked edge, and
+    /// never off the screen it was opened on.
+    private func noticeOrigin(size: NSSize, near frame: NSRect, on window: NSWindow) -> NSPoint {
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? frame
+        let gap: CGFloat = 8
+        let x = side == .right ? frame.minX - size.width - gap : frame.maxX + gap
+        let y = frame.midY - size.height / 2
+        return NSPoint(
+            x: min(max(x, visible.minX + 4), max(visible.minX + 4, visible.maxX - size.width - 4)),
+            y: min(max(y, visible.minY + 4), max(visible.minY + 4, visible.maxY - size.height - 4))
+        )
+    }
+
+    // MARK: Asking for a balance
+
+    /// Where a request for a fresh balance goes: a file beside the document, which
+    /// is the **one thing this process ever writes**.
+    ///
+    /// There is no socket between the halves, and the daemon holds no key, so a
+    /// click cannot fetch anything itself. It touches this file instead, and the
+    /// publisher — which does hold the seam — serves it on its next heartbeat.
+    private var refreshRequestPath: String { options.statePath + ".refresh" }
+
+    private func requestBalanceRefresh() {
+        try? Data().write(to: URL(fileURLWithPath: refreshRequestPath))
+        // The list is rebuilt when it is opened, so leaving it open would show the
+        // old figure anyway; and the answer takes a heartbeat to arrive.
+        openMenu?.cancelTracking()
+        pendingNotice = "asked for a fresh balance…"
+    }
+
     // MARK: Menu
 
     /// The list hangs inward from the side the light is docked to, so a docked
@@ -1289,9 +1505,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // across a row would take the clicks meant for it.
         let level = window.level
         window.level = .floating
+        openMenu = menu
         menu.popUp(positioning: nil, at: point, in: nil)
+        openMenu = nil
         window.level = level
         window.orderFrontRegardless()
+
+        // Something asked to be said while the list had the screen.
+        if let text = pendingNotice {
+            pendingNotice = nil
+            flash(text)
+        }
     }
 
     /// The list is a list of lists. Almost everything worth putting in it is a
@@ -1366,12 +1590,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let held = account.figures.filter { !isZero($0.total) }
         for figures in held {
-            // The figure on its own line, titled by its currency. A balance is
-            // one number: folding it behind its own name put the answer a click
-            // deeper than the question, and the breakdown it unfolded into —
-            // granted, topped up — is a page's business rather than a light's.
+            // The figure on its own line, titled by its currency, and **clickable**.
+            // A balance is the one thing in this list that is stale on purpose — it
+            // moves when the account is charged, and it is fetched every few
+            // minutes — so the row that shows it is also the way to ask again. The
+            // `↻` is the affordance: a row that looks like a label and does
+            // something is worse than one that says so.
+            let row = ValueRow(label: "\(figures.currency) ↻", value: figures.total)
+            row.toolTip = "Click for a fresh balance"
+            row.onClick = { [weak self] in self?.requestBalanceRefresh() }
             let item = NSMenuItem()
-            item.view = ValueRow(label: figures.currency, value: figures.total)
+            item.view = row
             item.isEnabled = true
             menu.addItem(item)
         }
@@ -1623,6 +1852,16 @@ final class ValueRow: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("not built from a nib")
+    }
+
+    /// A click on the row, for the rows that are also a control — the balance,
+    /// because a figure you can ask to have refreshed should not be a label.
+    var onClick: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseUp(with event: NSEvent) {
+        onClick?()
     }
 }
 

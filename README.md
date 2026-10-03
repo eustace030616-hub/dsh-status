@@ -32,13 +32,14 @@ open ~/traffic-light/bin/DSHLight.app
 | **yellow, pulsing** | a session is blocked on you (`asking`) — 30% → 100% over 1.3 s |
 | **green** | a turn finished and you have not read it (`waiting`) |
 | **red** | the feed itself cannot be trusted — gone, unreadable or stale |
+| **red, pulsing** | the balance is under the threshold, or the provider will not cover a call |
 
 | You do | It does |
 |---|---|
 | **double-click** | switch between DSH and the application you came from |
+| **single click** | says what the light means, beside it, and goes away by itself |
 | **right-click** | open the list: `Appearance`, `Account`, `Quit the light` |
 | **drag** | dock to the nearer screen edge, at whatever height you drop it |
-| **single click** | nothing, on purpose — it only shows the click arrived |
 
 A green settles by itself while DSH is in front, because being here is what the reminder was asking for.
 
@@ -54,6 +55,7 @@ Appearance ▸                    Account ▸
 
 The sliders apply as they are dragged and are remembered; `Reset to default` restores 20 / 8 / 28% / 85%.
 The account is one line per currency that holds something, with the platform's own top-up page below it.
+**Click a currency line** — the `↻` is the hint — to ask for a fresh balance.
 
 ## How the data moves
 
@@ -62,8 +64,8 @@ One file, one direction:
 ```
 DSH Desktop                                  the daemon (DSHLight)
   agent/pre-step       a prompt was accepted   reads the document every 0.25 s
-  agent/turn-stopping  the ordinary turn end   never writes, never fetches,
-  agent/status         idle | running          holds no credential
+  agent/turn-stopping  the ordinary turn end   never fetches, holds no credential
+  agent/status         idle | running
   approval/request     blocked on you
   user-questions/…     blocked on you
         │                                             ▲
@@ -74,6 +76,9 @@ DSH Desktop                                  the daemon (DSHLight)
         ▼                                             │
   ~/Library/Application Support/dsh-status/state.json ┘
         written to a temp file and renamed into place
+
+  the daemon's one write, for a balance on demand:
+  click a currency line → touch <statePath>.refresh → served on the next heartbeat
 ```
 
 - **Many sessions, one light.** Every root session travels in `meta.sessions`; the daemon aggregates
@@ -140,7 +145,7 @@ Every key is optional and validated by hand; an unusable value falls back to the
 ## The daemon
 
 ```bash
-npm test                  # 64 checks — no DSH, no network, no key
+npm test                  # 65 checks — no DSH, no network, no key
 npm run ship              # rebuild bin/ from the Swift (npm test fails if it drifts)
 ./mac/build.sh --run      # follow the light in a terminal
 open build/DSHLight.app   # draw it by hand
@@ -157,6 +162,7 @@ pkill -f DSHLight         # stop it
 | `--no-ack` | keep green until the next prompt instead of settling on return |
 | `--level floating\|status\|screensaver` | how high the window sits, default `screensaver` |
 | `--size POINTS` | lens size for this run, overriding the size slider |
+| `--low-balance POINTS` | when a balance turns the light red and breathing, default `8`, in the currency holding the most; `0` turns it off |
 
 Worth knowing:
 
@@ -164,8 +170,10 @@ Worth knowing:
   taken from its narrow side; the ring around a lens is light grey, never black.
 - The **menu bar's 22 points are always reserved**, never followed: `visibleFrame` reports the whole screen
   in both bar states, and riding the bar produced a laggy light that overlapped it.
-- **Red is the feed, never the session.** A balance that cannot be read is a dim row in the list, never a lens.
-- The daemon **holds no key and makes no requests**; every account figure comes from the publisher.
+- **Red is never about the agent.** A feed that cannot be trusted is red and steady; a balance running out
+  is red and breathing; an account that cannot be read at all is a dim row in the list, never a lens.
+- The daemon **holds no key and fetches nothing**; every account figure comes from the publisher, and the
+  only thing it writes is a refresh request.
 - **One light per user** — an exclusive `flock` for the life of the process.
 - The double-click **restores the application, not the window or tab** — as far as public API reaches.
 - **No Apple account is needed**: ad-hoc signed, and a package-manager install sets no quarantine flag.
