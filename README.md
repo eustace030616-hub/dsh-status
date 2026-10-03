@@ -37,7 +37,7 @@ open ~/traffic-light/bin/DSHLight.app
 | You do | It does |
 |---|---|
 | **double-click** | switch between DSH and the application you came from |
-| **single click** | says what the light means, beside it, at once — it drifts up and is gone in about half a second |
+| **single click** | says what the light means, beside it, at once — it drifts up and leaves after a second or so, longer for a longer sentence |
 | **right-click** | open the list: `Appearance`, `Account`, `Quit the light` |
 | **drag** | dock to the nearer screen edge, at whatever height you drop it |
 

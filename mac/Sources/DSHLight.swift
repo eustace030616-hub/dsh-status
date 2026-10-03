@@ -1426,14 +1426,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
         notice = panel
 
-        // A very short hold, then it drifts up and fades: crisp enough to read at a
-        // glance and gone before it becomes furniture on the screen.
+        // Long enough to read, short enough not to linger. The hold grows with the
+        // sentence — "working — prompt" needs less than "no signal — stale
+        // (heartbeat 2.0s)" — and the drift-and-fade is the same for all of them,
+        // which is what makes it read as leaving rather than vanishing.
+        let hold = min(1.3, 0.45 + 0.022 * Double(text.count))
         let rise: CGFloat = 10
         let raised = panel.frame.offsetBy(dx: 0, dy: rise)
-        let hide = Timer(timeInterval: 0.16, repeats: false) { [weak self] _ in
+        let hide = Timer(timeInterval: hold, repeats: false) { [weak self] _ in
             guard let self, self.notice === panel else { return }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.42
+                context.duration = 0.5
                 panel.animator().alphaValue = 0
                 // `frame`, not `setFrameOrigin`: that is the key path a window
                 // proxy animates — an origin setter on the proxy moves nothing.

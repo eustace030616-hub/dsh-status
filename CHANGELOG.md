@@ -15,6 +15,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-02
+
+### Changed
+
+- **The message stays long enough to read.** 0.8.1 made it too quick: it was crisp, but a sentence that is
+  gone in 0.59 s cannot be read. The hold now grows with the sentence — 0.45 s plus 22 ms a character, capped
+  at 1.3 s — and the drift-and-fade is a constant 0.5 s, which is what makes it read as leaving rather than
+  vanishing. Measured on the real panel, fully opaque time and total life:
+
+  | Message | Readable | Gone |
+  |---|---|---|
+  | `working — prompt` (16) | 0.82 s | 1.31 s |
+  | `ready — finished, unread` (24) | 1.00 s | 1.49 s |
+  | `balance low — CNY 11.70` (23) | 0.98 s | 1.47 s |
+  | `no signal — stale (heartbeat 2.0s)` (34) | 1.22 s | 1.71 s |
+  | `blocked on you — a permission or a question` (43) | 1.31 s | 1.81 s |
+
+  And a second click still takes it away at once.
+
 ## [0.8.1] - 2026-10-02
 
 ### Changed
