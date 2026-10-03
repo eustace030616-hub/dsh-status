@@ -37,7 +37,7 @@ open ~/traffic-light/bin/DSHLight.app
 | You do | It does |
 |---|---|
 | **double-click** | switch between DSH and the application you came from |
-| **single click** | says what the light means, beside it, and goes away by itself |
+| **single click** | says what the light means, beside it, at once — it drifts up and is gone in about half a second |
 | **right-click** | open the list: `Appearance`, `Account`, `Quit the light` |
 | **drag** | dock to the nearer screen edge, at whatever height you drop it |
 
@@ -55,7 +55,8 @@ Appearance ▸                    Account ▸
 
 The sliders apply as they are dragged and are remembered; `Reset to default` restores 20 / 8 / 28% / 85%.
 The account is one line per currency that holds something, with the platform's own top-up page below it.
-**Click a currency line** — the `↻` is the hint — to ask for a fresh balance.
+**Click a currency line** — the `↻` is the hint — to ask for a fresh balance. The list stays open, and the
+figure is rewritten in place when the answer lands.
 
 ## How the data moves
 

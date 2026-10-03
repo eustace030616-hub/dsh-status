@@ -834,8 +834,10 @@ final class TrafficLightView: NSView {
     var onTap: (() -> Void)?
     var onMove: ((NSPoint) -> Void)?
     var onMenu: (() -> Void)?
-    /// A single click, once it is clear no second one is coming.
+    /// A single click: say what the light means.
     var onNotice: (() -> Void)?
+    /// A second click arrived, so whatever the first one said is the wrong answer.
+    var onNoticeOff: (() -> Void)?
 
     private var originAtDragStart: NSPoint?
     private var mouseAtDragStart: NSPoint?
@@ -1025,20 +1027,17 @@ final class TrafficLightView: NSView {
         } else if clicksAtMouseDown >= 2 {
             pendingUntil = nil
             needsDisplay = true
+            onNoticeOff?()
             onTap?()
         } else {
-            // First click: show that it arrived, and — if no second click
-            // follows — say what the light means. Waiting for the partner gesture
-            // is what keeps a double-click from flashing a message on its way to
-            // navigating.
+            // First click: show that it arrived, and say what the light means at
+            // once. Making the message wait to see whether a second click is coming
+            // reads as a delay; the second click simply takes it away again.
             pendingUntil = Date().addingTimeInterval(0.7)
             needsDisplay = true
+            onNotice?()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-                guard let self else { return }
-                self.needsDisplay = true
-                guard self.pendingUntil != nil else { return }
-                self.pendingUntil = nil
-                self.onNotice?()
+                self?.needsDisplay = true
             }
         }
     }
@@ -1066,10 +1065,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// nothing is being said.
     private var notice: NSWindow?
     private var noticeHide: Timer?
-    /// The list while it is open, so a click inside it can close it.
+    /// The list while it is open, so a figure that lands can be written into it.
     private var openMenu: NSMenu?
-    /// Set when a request has to wait for the list to close before it can speak.
-    private var pendingNotice: String?
+    /// The currency rows of that list, by currency.
+    private var accountRows: [(currency: String, row: ValueRow)] = []
     /// How far the light sits from the side it is docked to.
     private static let dockInset: CGFloat = 10
     /// How solid the grey body behind the lenses is, against the material's own
@@ -1176,6 +1175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.onMove = { [weak self] _ in self?.dock() }
         view.onMenu = { [weak self] in self?.showMenu() }
         view.onNotice = { [weak self] in self?.sayWhatTheLightMeans() }
+        view.onNoticeOff = { [weak self] in self?.hideNotice() }
         container.addSubview(backdrop)
         container.addSubview(shade)
         container.addSubview(view)
@@ -1216,6 +1216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Kept whether or not the colour moved: the account can change while the
         // light stays exactly as it is, and the list is built on demand.
         reading = next
+        // A figure asked for from the list arrives here, with the list still open.
+        if openMenu != nil { syncAccountRows() }
         // Redraw only when the colour actually changes: the light is idle most
         // of the time, and the reading itself changes every heartbeat tick.
         if next.light != view.reading.light {
@@ -1420,21 +1422,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = window.level
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = body
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
         notice = panel
 
-        let hide = Timer(timeInterval: 2.4, repeats: false) { [weak self] _ in
-            guard let self else { return }
+        // A very short hold, then it drifts up and fades: crisp enough to read at a
+        // glance and gone before it becomes furniture on the screen.
+        let rise: CGFloat = 10
+        let raised = panel.frame.offsetBy(dx: 0, dy: rise)
+        let hide = Timer(timeInterval: 0.16, repeats: false) { [weak self] _ in
+            guard let self, self.notice === panel else { return }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.35
-                self.notice?.animator().alphaValue = 0
-            } completionHandler: {
-                self.notice?.orderOut(nil)
-                self.notice = nil
+                context.duration = 0.42
+                panel.animator().alphaValue = 0
+                // `frame`, not `setFrameOrigin`: that is the key path a window
+                // proxy animates — an origin setter on the proxy moves nothing.
+                panel.animator().setFrame(raised, display: true)
+            } completionHandler: { [weak self] in
+                panel.orderOut(nil)
+                if self?.notice === panel { self?.notice = nil }
             }
         }
         RunLoop.current.add(hide, forMode: .common)
         noticeHide = hide
+    }
+
+    /// Take the message away at once — a second click means the user meant the
+    /// other gesture, and a wrong sentence should not stay on the screen.
+    private func hideNotice() {
+        noticeHide?.invalidate()
+        noticeHide = nil
+        notice?.orderOut(nil)
+        notice = nil
     }
 
     /// Where the message goes: beside the light, inward from the docked edge, and
@@ -1461,11 +1480,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var refreshRequestPath: String { options.statePath + ".refresh" }
 
     private func requestBalanceRefresh() {
+        // The list stays open, and no message is shown: this is not a change of
+        // state, it is a question — and the answer belongs in the row that asked
+        // it, which is where `syncAccountRows` puts it when it lands.
         try? Data().write(to: URL(fileURLWithPath: refreshRequestPath))
-        // The list is rebuilt when it is opened, so leaving it open would show the
-        // old figure anyway; and the answer takes a heartbeat to arrive.
-        openMenu?.cancelTracking()
-        pendingNotice = "asked for a fresh balance…"
+    }
+
+    /// Write a figure into the row showing it, while the list is open.
+    ///
+    /// The list is a snapshot of the moment it was opened, and a balance is the one
+    /// thing in it that can change while somebody is looking at it — a refresh
+    /// whose answer arrived only after the list had been closed and reopened would
+    /// not be worth clicking.
+    private func syncAccountRows() {
+        guard let account = reading.account else { return }
+        for (currency, row) in accountRows {
+            guard let figures = account.figures.first(where: { $0.currency == currency }) else { continue }
+            row.show(figures.total)
+        }
     }
 
     // MARK: Menu
@@ -1510,12 +1542,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openMenu = nil
         window.level = level
         window.orderFrontRegardless()
-
-        // Something asked to be said while the list had the screen.
-        if let text = pendingNotice {
-            pendingNotice = nil
-            flash(text)
-        }
     }
 
     /// The list is a list of lists. Almost everything worth putting in it is a
@@ -1589,6 +1615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return menu
         }
         let held = account.figures.filter { !isZero($0.total) }
+        accountRows = []
         for figures in held {
             // The figure on its own line, titled by its currency, and **clickable**.
             // A balance is the one thing in this list that is stale on purpose — it
@@ -1597,8 +1624,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // `↻` is the affordance: a row that looks like a label and does
             // something is worse than one that says so.
             let row = ValueRow(label: "\(figures.currency) ↻", value: figures.total)
-            row.toolTip = "Click for a fresh balance"
+            row.toolTip = "Click for a fresh balance — the figure updates here"
             row.onClick = { [weak self] in self?.requestBalanceRefresh() }
+            accountRows.append((figures.currency, row))
             let item = NSMenuItem()
             item.view = row
             item.isEnabled = true
@@ -1857,6 +1885,13 @@ final class ValueRow: NSView {
     /// A click on the row, for the rows that are also a control — the balance,
     /// because a figure you can ask to have refreshed should not be a label.
     var onClick: (() -> Void)?
+
+    /// Put a new figure in the row. Called while the list is open, when a balance
+    /// that was asked for finally lands.
+    func show(_ value: String) {
+        guard figure.stringValue != value else { return }
+        figure.stringValue = value
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

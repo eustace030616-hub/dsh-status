@@ -15,6 +15,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-02
+
+### Changed
+
+- **The click message is instant, drifts up, and is gone in about half a second.** It used to wait out the
+  whole double-click window (0.75 s) before appearing and then sit there for 2.4 s, which reads as a delay
+  followed by clutter. It now appears on the first click, and the second click — the navigation gesture —
+  takes it away again, so a wrong sentence never stays on the screen. Measured on the real panel: on screen at
+  0 s, the fade starts at 0.18 s, and it is gone by 0.59 s, having risen 10 pt. (`setFrame` on the window
+  proxy, not `setFrameOrigin` — the latter animates nothing, which the probe caught.)
+- **A refresh no longer closes the list, and says nothing.** The row is where the answer belongs, so the list
+  stays open and the figure is rewritten **in place** when it lands; the light's poll timer runs in common
+  modes, so it fires while a menu is tracking. Nothing is printed for a refresh: the message is about the
+  light's state, not about an action taken inside the list. Measured: a row reading `CNY ↻ | 11.00` becomes
+  `CNY ↻ | 5.00` with the list open, and stays put when nothing is looking at it.
+
 ## [0.8.0] - 2026-10-02
 
 ### Added
